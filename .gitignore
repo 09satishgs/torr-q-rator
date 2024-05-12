@@ -1,0 +1,47 @@
+# Environment variable files (never commit secrets/private keys)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Container runtime persistent storage & downloads
+data/
+downloads/
+
+# System / OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE & Editor configurations
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# Log files
+*.log
+logs/
+
+# Optional temporary build output
+dist/
+build/

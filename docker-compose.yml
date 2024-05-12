@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: torrentqrator-gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - VPN_SERVICE_PROVIDER=surfshark
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=${SURFSHARK_WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_ADDRESSES=${SURFSHARK_WIREGUARD_ADDRESSES}
+      - SERVER_COUNTRIES=${SURFSHARK_COUNTRY:-Netherlands}
+      - DOT=off
+      - DNS_PLAINTEXT_ADDRESS=1.1.1.1
+      - DNS_UPDATE_PERIOD=0
+      - TZ=${TZ:-Asia/Kolkata}
+    ports:
+      - "8080:8080" # qBittorrent Web UI
+      - "9696:9696" # Prowlarr Web UI (routed via gluetun)
+      - "6881:6881" # Torrent peer listening port
+      - "6881:6881/udp"
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: torrentqrator-qbittorrent
+    network_mode: "service:gluetun"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Asia/Kolkata}
+      - WEBUI_PORT=8080
+      - TORRENTING_PORT=6881
+    volumes:
+      - ./data/qbittorrent:/config
+      - ./downloads:/downloads
+    depends_on:
+      - gluetun
+    restart: unless-stopped
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: torrentqrator-prowlarr
+    network_mode: "service:gluetun"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Asia/Kolkata}
+    volumes:
+      - ./data/prowlarr:/config
+    depends_on:
+      - gluetun
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: torrentqrator-app
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - PORT=${PORT:-3000}
+      - PROWLARR_BASE_URL=${PROWLARR_BASE_URL:-http://gluetun:9696}
+      - PROWLARR_API_KEY=${PROWLARR_API_KEY}
+      - QBITTORRENT_BASE_URL=${QBITTORRENT_BASE_URL:-http://gluetun:8080}
+      - QBITTORRENT_USERNAME=${QBITTORRENT_USERNAME:-admin}
+      - QBITTORRENT_PASSWORD=${QBITTORRENT_PASSWORD:-adminadmin}
+      - DEFAULT_DOWNLOAD_DIR=${DEFAULT_DOWNLOAD_DIR:-/downloads}
+    depends_on:
+      - gluetun
+      - prowlarr
+      - qbittorrent
+    restart: unless-stopped
+
+networks:
+  default:
+    name: torrentqrator-network

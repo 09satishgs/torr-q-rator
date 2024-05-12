@@ -1,0 +1,48 @@
+{
+  "name": "torrentqrator",
+  "version": "1.0.0",
+  "description": "Modern Web-based Torrent Search Engine & Download Manager",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev:server": "node --watch src/index.js",
+    "dev:client": "webpack serve --mode development",
+    "build": "webpack --mode production",
+    "dev": "node src/index.js"
+  },
+  "keywords": [
+    "torrent",
+    "prowlarr",
+    "qbittorrent",
+    "gluetun",
+    "surfshark",
+    "react",
+    "webpack"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.7.9",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.26.9",
+    "@babel/preset-env": "^7.26.9",
+    "@babel/preset-react": "^7.26.3",
+    "babel-loader": "^9.2.1",
+    "css-loader": "^7.1.2",
+    "css-minimizer-webpack-plugin": "^7.0.0",
+    "html-webpack-plugin": "^5.6.3",
+    "mini-css-extract-plugin": "^2.9.2",
+    "style-loader": "^4.0.0",
+    "terser-webpack-plugin": "^5.3.11",
+    "webpack": "^5.98.0",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.0"
+  }
+}
