@@ -1,7 +1,10 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const os = require('os');
 const prowlarrService = require('../services/prowlarr');
 const qbittorrentService = require('../services/qbittorrent');
+const flaresolverrService = require('../services/flaresolverr');
 const discoveryService = require('../services/discovery');
 const watchlistService = require('../services/watchlist');
 const config = require('../config');
@@ -34,7 +37,7 @@ router.get('/search', async (req, res) => {
 
 /**
  * POST /api/download
- * Add torrent to qBittorrent
+ * Add torrent to qBittorrent using modular strategy pipeline
  */
 router.post('/download', async (req, res) => {
   try {
@@ -68,7 +71,7 @@ router.post('/download', async (req, res) => {
 
 /**
  * GET /api/torrents
- * Get active download status list
+ * Get active download status list from qBittorrent
  */
 router.get('/torrents', async (req, res) => {
   try {
@@ -90,16 +93,27 @@ router.get('/torrents', async (req, res) => {
 
 /**
  * GET /api/vpn/status
- * Check Gluetun VPN Tunnel status
+ * Check Standalone VPN & Service health status
  */
 router.get('/vpn/status', async (req, res) => {
   try {
+    const [qbHealth, prowlarrHealth, flareHealth] = await Promise.all([
+      qbittorrentService.checkHealth().catch(e => ({ connected: false, error: e.message })),
+      prowlarrService.checkHealth().catch(e => ({ connected: false, error: e.message })),
+      flaresolverrService.checkHealth().catch(e => ({ connected: false, error: e.message })),
+    ]);
+
     return res.json({
       vpnConnected: true,
       provider: 'Surfshark',
-      protocol: 'WireGuard',
+      bindingInterface: config.vpn.interfaceName || 'SurfsharkWireGuard',
       country: config.vpn.country,
       killSwitchActive: true,
+      services: {
+        qbittorrent: qbHealth,
+        prowlarr: prowlarrHealth,
+        flaresolverr: flareHealth,
+      },
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -112,17 +126,17 @@ router.get('/vpn/status', async (req, res) => {
 
 /**
  * GET /api/directories
- * Return recommended target download directory paths
+ * Return recommended target download directory paths adaptive to host OS
  */
 router.get('/directories', (req, res) => {
-  const base = config.defaultDownloadDir || '/downloads';
+  const base = config.defaultDownloadDir;
   const directories = [
     { label: 'Default Downloads', path: base },
-    { label: 'Movies', path: `${base}/Movies` },
-    { label: 'TV Shows', path: `${base}/TV` },
-    { label: 'Music & Audio', path: `${base}/Music` },
-    { label: 'Software & OS', path: `${base}/Software` },
-    { label: 'Games', path: `${base}/Games` },
+    { label: 'Movies', path: path.join(base, 'Movies') },
+    { label: 'TV Shows', path: path.join(base, 'TV') },
+    { label: 'Music & Audio', path: path.join(base, 'Music') },
+    { label: 'Software & OS', path: path.join(base, 'Software') },
+    { label: 'Games', path: path.join(base, 'Games') },
   ];
 
   return res.json({

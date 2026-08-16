@@ -2,12 +2,13 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const config = require('./config');
 const apiRoutes = require('./routes/api');
 
 const app = express();
 
-// Request logging middleware for container log visibility
+// Request logging middleware for request visibility
 app.use((req, res, next) => {
   const start = Date.now();
   res.on('finish', () => {
@@ -44,15 +45,37 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Helper to get local network IPv4 addresses
+function getLocalIpAddresses() {
+  const interfaces = os.networkInterfaces();
+  const ips = [];
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        ips.push({ name, address: iface.address });
+      }
+    }
+  }
+  return ips;
+}
+
 // Start Express server
 const PORT = config.port;
-app.listen(PORT, () => {
-  console.log(`===================================================`);
-  console.log(` TorrentQrator Web UI & REST API is running`);
-  console.log(` Endpoint: http://localhost:${PORT}`);
-  console.log(` Static Path: ${staticPath}`);
-  console.log(` Prowlarr Base: ${config.prowlarr.baseUrl}`);
-  console.log(` qBittorrent Base: ${config.qbittorrent.baseUrl}`);
-  console.log(` Default Download Dir: ${config.defaultDownloadDir}`);
-  console.log(`===================================================`);
+const HOST = config.host || '0.0.0.0';
+
+app.listen(PORT, HOST, () => {
+  const localIps = getLocalIpAddresses();
+  console.log(`================================================================`);
+  console.log(` ⚡ TorrQrator Standalone Server is RUNNING`);
+  console.log(` ----------------------------------------------------------------`);
+  console.log(` Local:            http://localhost:${PORT}`);
+  localIps.forEach(ip => {
+    console.log(` Network (LAN):    http://${ip.address}:${PORT} (${ip.name})`);
+  });
+  console.log(` ----------------------------------------------------------------`);
+  console.log(` Prowlarr API:     ${config.prowlarr.baseUrl}`);
+  console.log(` qBittorrent Web:  ${config.qbittorrent.baseUrl}`);
+  console.log(` FlareSolverr:     ${config.flaresolverr.baseUrl} (enabled: ${config.flaresolverr.enabled})`);
+  console.log(` Download Folder:  ${config.defaultDownloadDir}`);
+  console.log(`================================================================`);
 });
