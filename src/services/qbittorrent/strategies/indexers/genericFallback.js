@@ -2,6 +2,7 @@ const logger = require('../../../../utils/logger');
 
 /**
  * Generic Indexer Fallback Handler
+ * Triggered when both magnetUrl and downloadUrl were empty, invalid, or errored out.
  */
 class GenericFallbackIndexerHandler {
   constructor() {
@@ -12,25 +13,22 @@ class GenericFallbackIndexerHandler {
     return true;
   }
 
-  async handle(torrent, savePath, context) {
-    logger.info('GenericFallbackHandler', `[MOCK FALLBACK] Executing generic indexer fallback handler for "${torrent.indexer || 'Unknown'}"`, {
-      title: torrent.title,
-      indexer: torrent.indexer,
-      downloadUrl: torrent.downloadUrl,
-      magnetUrl: torrent.magnetUrl,
-      guid: torrent.id || torrent.guid,
+  /**
+   * Handle generic indexer fallback flow
+   * @param {Object} torrent
+   * @param {string} savePath
+   * @param {Object} context
+   */
+  async addTorrent(torrent, savePath, context) {
+    logger.error('GenericFallbackHandler', `[INDEXER FALLBACK] Failed to add torrent for indexer "${torrent.indexer || 'Unknown'}"`, {
+      torrent,
       savePath,
+      reason: 'Both magnetUrl and downloadUrl were absent, invalid, or failed during transfer',
     });
-
-    const fallbackLink = torrent.downloadUrl || torrent.magnetUrl || torrent.link || torrent.id;
-    if (fallbackLink && typeof fallbackLink === 'string') {
-      logger.info('GenericFallbackHandler', `Submitting raw fallback URL string to qBittorrent client: ${fallbackLink.slice(0, 80)}...`);
-      return await context.client.addTorrentByUrl(fallbackLink, savePath);
-    }
 
     return {
       ok: false,
-      error: `No valid magnet, download URL, or fallback link available for indexer "${torrent.indexer || 'Unknown'}"`,
+      error: `Indexer fallback error: Unable to add torrent for "${torrent.title || 'Untitled'}" via indexer "${torrent.indexer || 'Unknown'}"`,
     };
   }
 }

@@ -21,7 +21,7 @@ class DefaultDownloadStrategy {
    * @param {Object} context { client, torrent }
    */
   async handle(magnetUrl, savePath, context) {
-    let cleanMagnet = magnetUrl.trim().replace(/&amp;/g, '&');
+    const cleanMagnet = magnetUrl.trim().replace(/&amp;/g, '&');
 
     const hashMatch = cleanMagnet.match(/xt=urn:btih:([a-zA-Z0-9]+)/i);
     const hashSnippet = hashMatch ? `[BTIH: ${hashMatch[1].substring(0, 8)}...]` : '';
@@ -32,7 +32,11 @@ class DefaultDownloadStrategy {
       indexer: context.torrent?.indexer,
     });
 
-    return await context.client.addTorrentByUrl(cleanMagnet, savePath);
+    const result = await context.client.addTorrentByUrl(cleanMagnet, savePath);
+    if (!result || !result.ok) {
+      throw new Error(result?.error || 'Failed to add magnet URL to qBittorrent WebUI');
+    }
+    return result;
   }
 }
 

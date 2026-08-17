@@ -1,6 +1,5 @@
 const client = require('./client');
 const strategyManager = require('./strategyManager');
-const config = require('../../config');
 const logger = require('../../utils/logger');
 
 class QBittorrentService {
@@ -19,21 +18,24 @@ class QBittorrentService {
 
   /**
    * Add a new torrent via the 3-step download resolution pipeline
-   * @param {Object|string} torrentInput Full Prowlarr torrent result object or URL string
-   * @param {string} savePath Target directory (defaults to config)
+   * @param {Object} torrent Prowlarr torrent result object
+   * @param {string} savePath Target directory path
    */
-  async addTorrent(torrentInput, savePath) {
-    if (!torrentInput) {
-      return { ok: false, error: 'Invalid or missing torrent metadata' };
+  async addTorrent(torrent, savePath) {
+    if (!torrent || typeof torrent !== 'object') {
+      throw new Error('addTorrent requires a valid "torrent" object');
     }
 
-    const targetPath = savePath || config.defaultDownloadDir;
+    if (!savePath || typeof savePath !== 'string') {
+      throw new Error('addTorrent requires a valid "savePath" string');
+    }
+
     const context = {
       client: this.client,
       strategyManager: this.strategyManager,
     };
 
-    return await this.strategyManager.processDownload(torrentInput, targetPath, context);
+    return await this.strategyManager.processDownload(torrent, savePath, context);
   }
 
   /**
@@ -41,22 +43,6 @@ class QBittorrentService {
    */
   async getTorrentList() {
     return await this.client.getTorrentList();
-  }
-
-  /**
-   * Direct magnet or URL add
-   */
-  async addTorrentByUrl(sourceUrl, savePath) {
-    const targetPath = savePath || config.defaultDownloadDir;
-    return await this.client.addTorrentByUrl(sourceUrl, targetPath);
-  }
-
-  /**
-   * Direct binary upload
-   */
-  async uploadTorrentFile(fileBuffer, savePath) {
-    const targetPath = savePath || config.defaultDownloadDir;
-    return await this.client.uploadTorrentFile(fileBuffer, targetPath);
   }
 
   /**

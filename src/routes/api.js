@@ -67,56 +67,55 @@ router.get('/search', async (req, res) => {
 
 /**
  * POST /api/download
- * Add torrent to qBittorrent using 3-step pipeline (Magnet -> .torrent -> Indexer Fallback)
- * Accepts entire Prowlarr torrent object + savePath
+ * Add torrent to qBittorrent using 3-step pipeline (Magnet -> .torrent -> Indexer Specific Flow)
+ * Expects { torrent: Object, savePath: String }
  */
 router.post('/download', async (req, res) => {
   try {
-    const { torrent, savePath, source, torrentObject, indexer } = req.body;
+    const { torrent, savePath } = req.body;
 
-    // Support both { torrent, savePath } and legacy formats
-    const torrentPayload = torrent || torrentObject || (source ? {
-      title: 'Direct Torrent',
-      indexer: indexer || 'Direct',
-      magnetUrl: source.startsWith('magnet:') ? source : '',
-      downloadUrl: source.startsWith('http') ? source : '',
-      id: source,
-    } : null);
-
-    if (!torrentPayload) {
-      logger.warn('API:Download', 'Missing torrent object in download request', req.body);
+    if (!torrent || typeof torrent !== 'object') {
+      logger.error('API:Download', 'Missing or invalid "torrent" object in request body', req.body);
       return res.status(400).json({
         ok: false,
-        error: 'Missing torrent metadata object in request body',
+        error: 'Request body must contain a valid "torrent" object',
       });
     }
 
-    logger.info('API:Download', `Received download request for "${torrentPayload.title || 'Untitled'}" [${torrentPayload.indexer || 'Unknown'}]`, {
-      title: torrentPayload.title,
-      indexer: torrentPayload.indexer,
-      magnetUrl: torrentPayload.magnetUrl ? `${torrentPayload.magnetUrl.slice(0, 50)}...` : '',
-      downloadUrl: torrentPayload.downloadUrl ? `${torrentPayload.downloadUrl.slice(0, 50)}...` : '',
+    if (!savePath || typeof savePath !== 'string') {
+      logger.error('API:Download', 'Missing or invalid "savePath" string in request body', req.body);
+      return res.status(400).json({
+        ok: false,
+        error: 'Request body must contain a valid "savePath" string',
+      });
+    }
+
+    logger.info('API:Download', `Incoming download request for "${torrent.title || 'Untitled'}" [${torrent.indexer || 'Unknown'}]`, {
+      torrent,
       savePath,
     });
 
-    const result = (await qbittorrentService.addTorrent(torrentPayload, savePath)) || {
-      ok: false,
-      error: 'Download manager returned an empty response',
-    };
+    const result = await qbittorrentService.addTorrent(torrent, savePath);
 
-    if (!result.ok) {
-      logger.warn('API:Download', `Download queue failed: ${result.error}`, result);
-      return res.status(400).json(result);
+    if (!result || !result.ok) {
+      logger.error('API:Download', `Failed to queue torrent: ${result?.error || 'Unknown error'}`, {
+        torrent,
+        savePath,
+        result,
+      });
+      return res.status(400).json(result || { ok: false, error: 'Failed to add torrent' });
     }
 
     logger.info('API:Download', 'Torrent queued successfully to qBittorrent', result);
     return res.json(result);
   } catch (error) {
-    logger.error('API:Download', `Failed to queue torrent download: ${error.message}`);
+    logger.error('API:Download', `Exception while processing torrent download: ${error.message}`, {
+      error: error.message,
+      body: req.body,
+    });
     return res.status(500).json({
       ok: false,
-      error: 'Failed to add torrent download',
-      details: error.message,
+      error: error.message || 'Internal Server Error while adding torrent',
     });
   }
 });

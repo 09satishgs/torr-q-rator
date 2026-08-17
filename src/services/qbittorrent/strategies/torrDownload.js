@@ -29,7 +29,7 @@ class TorrDownloadStrategy {
   }
 
   /**
-   * Download .torrent binary buffer and upload to qBittorrent
+   * Download .torrent binary buffer and upload directly to qBittorrent
    * @param {string} downloadUrl
    * @param {string} savePath
    * @param {Object} context { client, torrent }
@@ -62,19 +62,26 @@ class TorrDownloadStrategy {
       const textSample = fileBuffer.slice(0, 500).toString('utf8').trim();
       if (textSample.startsWith('magnet:?')) {
         logger.info('TorrentBinary', 'Download URL returned a Magnet URI. Forwarding to qBittorrent URL queue...');
-        return await context.client.addTorrentByUrl(textSample, savePath);
+        const res = await context.client.addTorrentByUrl(textSample, savePath);
+        if (!res || !res.ok) throw new Error(res?.error || 'Failed to add magnet URL returned by endpoint');
+        return res;
       }
 
       if (fileBuffer.length > 0) {
         logger.info('TorrentBinary', `Downloaded .torrent buffer (${fileBuffer.length} bytes). Uploading multipart to qBittorrent...`);
-        return await context.client.uploadTorrentFile(fileBuffer, savePath);
+        const res = await context.client.uploadTorrentFile(fileBuffer, savePath);
+        if (!res || !res.ok) throw new Error(res?.error || 'Failed to upload .torrent binary buffer to qBittorrent');
+        return res;
       }
 
       throw new Error('Received 0 bytes from torrent download URL');
     } catch (error) {
-      logger.warn('TorrentBinary', `Direct buffer download failed (${error.message}). Delegating URL directly to qBittorrent client...`);
-      // Fallback: Dispatch URL directly to qBittorrent
-      return await context.client.addTorrentByUrl(url, savePath);
+      logger.warn('TorrentBinary', `Direct buffer download failed (${error.message}). Attempting fallback URL submission to qBittorrent...`);
+      const fallbackRes = await context.client.addTorrentByUrl(url, savePath);
+      if (!fallbackRes || !fallbackRes.ok) {
+        throw new Error(`Torrent download and upload failed: ${error.message} | URL fallback: ${fallbackRes?.error || 'failed'}`);
+      }
+      return fallbackRes;
     }
   }
 }

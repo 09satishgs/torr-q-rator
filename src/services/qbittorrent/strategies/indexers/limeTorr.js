@@ -1,7 +1,8 @@
 const logger = require('../../../../utils/logger');
 
 /**
- * LimeTorrents Specific Fallback Handler (Mock with logging for edge cases)
+ * LimeTorrents Specific Fallback Handler
+ * Triggered when both magnetUrl and downloadUrl were empty, invalid, or errored out.
  */
 class LimeTorrIndexerHandler {
   constructor() {
@@ -15,25 +16,22 @@ class LimeTorrIndexerHandler {
     return this.indexerKeys.some(key => lower.includes(key));
   }
 
-  async handle(torrent, savePath, context) {
-    logger.info('LimeTorrentsHandler', `[MOCK FALLBACK] Executing indexer-specific fallback handler for LimeTorrents`, {
-      title: torrent.title,
-      indexer: torrent.indexer,
-      downloadUrl: torrent.downloadUrl,
-      magnetUrl: torrent.magnetUrl,
+  /**
+   * Handle LimeTorrents specific fallback flow
+   * @param {Object} torrent
+   * @param {string} savePath
+   * @param {Object} context
+   */
+  async addTorrent(torrent, savePath, context) {
+    logger.error('LimeTorrentsHandler', `[INDEXER FALLBACK] Failed to add torrent for LimeTorrents indexer`, {
+      torrent,
       savePath,
+      reason: 'Both magnetUrl and downloadUrl were absent, invalid, or failed during transfer',
     });
-
-    // If downloadUrl exists, delegate to qBittorrent
-    const targetUrl = torrent.downloadUrl || torrent.magnetUrl || torrent.id;
-    if (targetUrl) {
-      logger.info('LimeTorrentsHandler', `Delegating LimeTorrents target URL directly to qBittorrent: ${targetUrl.slice(0, 80)}...`);
-      return await context.client.addTorrentByUrl(targetUrl, savePath);
-    }
 
     return {
       ok: false,
-      error: `LimeTorrents fallback handler could not find a valid link for "${torrent.title}"`,
+      error: `LimeTorrents indexer fallback: Failed to add torrent "${torrent.title || 'Untitled'}"`,
     };
   }
 }

@@ -6,7 +6,6 @@ class IndexerRegistry {
   constructor() {
     this.handlers = [
       limeTorrHandler,
-      // Add future custom indexer fallback handlers here (e.g. 1337x, nyaa, yts, etc.)
     ];
   }
 
@@ -15,13 +14,15 @@ class IndexerRegistry {
    * @param {string} indexerName
    */
   getHandler(indexerName) {
-    for (const handler of this.handlers) {
-      if (handler.canHandle(indexerName)) {
-        logger.debug('IndexerRegistry', `Matched custom indexer handler "${handler.name}" for indexer "${indexerName}"`);
-        return handler;
+    if (indexerName) {
+      for (const handler of this.handlers) {
+        if (handler.canHandle(indexerName)) {
+          logger.debug('IndexerRegistry', `Matched indexer-specific handler "${handler.name}" for "${indexerName}"`);
+          return handler;
+        }
       }
     }
-    logger.debug('IndexerRegistry', `No custom handler for "${indexerName}", using GenericFallbackHandler`);
+    logger.debug('IndexerRegistry', `No custom indexer handler for "${indexerName || 'Unknown'}", using GenericFallbackHandler`);
     return genericFallbackHandler;
   }
 }
