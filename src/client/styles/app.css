@@ -193,6 +193,45 @@ body {
   background-color: var(--status-green);
 }
 
+/* Debug Mode Toggle */
+.btn-debug-toggle {
+  background: #1a1a1a;
+  border: 1px solid var(--border-color);
+  color: var(--text-dim);
+  font-family: var(--font-family);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: var(--tr-fast);
+}
+
+.btn-debug-toggle:hover {
+  background: #252525;
+  color: var(--text-muted);
+  border-color: #444444;
+}
+
+.btn-debug-toggle.active {
+  background: rgba(229, 9, 20, 0.15);
+  border-color: var(--netflix-red);
+  color: var(--netflix-red);
+}
+
+.btn-debug-toggle.active i {
+  color: var(--netflix-red);
+  animation: pulse-icon 1.5s infinite;
+}
+
+@keyframes pulse-icon {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.1); }
+}
+
 /* Buttons */
 .btn {
   border: none;

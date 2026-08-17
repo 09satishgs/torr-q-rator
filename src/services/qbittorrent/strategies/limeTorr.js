@@ -8,30 +8,33 @@ class LimeTorrDownloadStrategy extends BaseDownloadStrategy {
   }
 
   /**
-   * Matches LimeTorrents URLs or HTML page detail links
+   * Specifically matches LimeTorrents indexer or explicit LimeTorrents domains
    */
-  canHandle(sourceUrl) {
-    if (!sourceUrl || typeof sourceUrl !== 'string') return false;
-    const trimmed = sourceUrl.trim().toLowerCase();
-    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-      return false;
+  canHandle(sourceUrl, context = {}) {
+    const indexerName = (context.indexer || context.torrentObject?.indexer || '').toLowerCase();
+    
+    // Explicit indexer match
+    if (indexerName.includes('limetorrent') || indexerName.includes('lime-torrent')) {
+      return true;
     }
 
-    return (
-      trimmed.includes('limetorrents') ||
-      trimmed.includes('lime-torrents') ||
-      trimmed.includes('.html') ||
-      trimmed.includes('.htm') ||
-      trimmed.includes('/torrent/')
-    );
+    if (!sourceUrl || typeof sourceUrl !== 'string') return false;
+    const trimmed = sourceUrl.trim().toLowerCase();
+
+    // Explicit domain match
+    return trimmed.includes('limetorrents.') || trimmed.includes('lime-torrents.');
   }
 
   /**
    * Scrape LimeTorrents HTML page, extract magnet or .torrent links, and fallback to FlareSolverr if blocked
    */
   async handle(sourceUrl, savePath, context) {
-    const pageUrl = sourceUrl.trim();
-    console.log(`[LimeTorrDownloadStrategy] Processing LimeTorrents/HTML details page: ${pageUrl.slice(0, 90)}...`);
+    const pageUrl = (sourceUrl || context.torrentObject?.downloadUrl || '').trim();
+    this.logger.info('LimeTorrHtmlScraper', `Processing LimeTorrents details page: ${pageUrl.slice(0, 90)}...`, {
+      indexer: context.indexer,
+      title: context.torrentObject?.title,
+      savePath,
+    });
 
     let htmlContent = null;
 
@@ -50,14 +53,14 @@ class LimeTorrDownloadStrategy extends BaseDownloadStrategy {
         htmlContent = response.data.toString('utf8');
       }
     } catch (err) {
-      console.warn(`[LimeTorrDownloadStrategy] Direct HTML fetch encountered error (${err.message}). Checking FlareSolverr...`);
+      this.logger.warn('LimeTorrHtmlScraper', `Direct HTML fetch failed (${err.message}). Checking FlareSolverr...`);
       // If direct fetch got 403 / 503 (Cloudflare challenge) and FlareSolverr is enabled, attempt bypass
       if (flaresolverrService.enabled) {
         try {
-          console.log(`[LimeTorrDownloadStrategy] Engaging FlareSolverr for Cloudflare bypass on ${pageUrl}...`);
+          this.logger.info('LimeTorrHtmlScraper', `Engaging FlareSolverr for Cloudflare bypass on ${pageUrl}...`);
           htmlContent = await flaresolverrService.extractHtml(pageUrl);
         } catch (flareErr) {
-          console.warn(`[LimeTorrDownloadStrategy] FlareSolverr bypass failed: ${flareErr.message}`);
+          this.logger.warn('LimeTorrHtmlScraper', `FlareSolverr bypass failed: ${flareErr.message}`);
         }
       }
     }
@@ -67,21 +70,21 @@ class LimeTorrDownloadStrategy extends BaseDownloadStrategy {
       // 1. Look for magnet link
       const magnet = this.extractMagnetFromHtml(htmlContent);
       if (magnet) {
-        console.log('[LimeTorrDownloadStrategy] Successfully extracted magnet link from LimeTorrents HTML DOM!');
+        this.logger.info('LimeTorrHtmlScraper', 'Successfully extracted magnet link from LimeTorrents HTML DOM!');
         return await context.client.addTorrentByUrl(magnet, savePath);
       }
 
-      // 2. Look for LimeTorrents direct download button link (e.g. href="http://itorrents.org/torrent/..." or "/download/...")
+      // 2. Look for LimeTorrents direct download button link (e.g. href="http://itorrents.org/torrent/..." or ".torrent")
       const itorrentMatch = htmlContent.match(/href=["'](https?:\/\/[^"']+\.torrent[^"']*)["']/i);
       if (itorrentMatch) {
         const directTorrentUrl = itorrentMatch[1];
-        console.log(`[LimeTorrDownloadStrategy] Found direct .torrent link on page: ${directTorrentUrl}`);
+        this.logger.info('LimeTorrHtmlScraper', `Found direct .torrent link on page: ${directTorrentUrl}`);
         return await context.strategyManager.executeStrategy('TorrentBinary', directTorrentUrl, savePath, context);
       }
     }
 
     // Phase 3: Fallback - dispatch raw URL directly to qBittorrent client
-    console.warn('[LimeTorrDownloadStrategy] Could not parse links from HTML. Delegating raw URL to qBittorrent desktop client...');
+    this.logger.warn('LimeTorrHtmlScraper', 'Could not parse links from HTML. Delegating raw URL to qBittorrent desktop client...');
     return await context.client.addTorrentByUrl(pageUrl, savePath);
   }
 }

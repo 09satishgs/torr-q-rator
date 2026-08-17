@@ -10,6 +10,7 @@ import DownloadModal from "./components/DownloadModal";
 import TransfersDrawer from "./components/TransfersDrawer";
 import TextSelectTooltip from "./components/TextSelectTooltip";
 import Toast from "./components/Toast";
+import { logger } from "./services/logger";
 import {
   searchTorrents,
   fetchDirectories,
@@ -19,10 +20,14 @@ import {
   fetchWatchlist,
   addWatchlistItem,
   removeWatchlistItem,
+  setBackendDebug,
 } from "./services/api";
 
 export default function App() {
   const navigate = useNavigate();
+
+  // Debug Mode State
+  const [isDebug, setIsDebug] = useState(() => logger.isDebugEnabled());
 
   // Multi-Source MDH Persisted State with Isolated Per-Source Objects
   const [mdhState, setMdhState] = useState({
@@ -92,6 +97,19 @@ export default function App() {
     }, 4500);
   }, []);
 
+  const handleToggleDebug = async () => {
+    const nextState = !isDebug;
+    setIsDebug(nextState);
+    logger.setDebugMode(nextState);
+    await setBackendDebug(nextState);
+    addToast(
+      nextState
+        ? "Debug Mode ENABLED: Detailed logs active in Console & Terminal"
+        : "Debug Mode DISABLED",
+      nextState ? "success" : "info"
+    );
+  };
+
   const updateMdhState = (sourceOrKey, partial) => {
     if (sourceOrKey === "ACTIVE_SOURCE") {
       setMdhState((prev) => ({ ...prev, activeSource: partial }));
@@ -121,14 +139,14 @@ export default function App() {
         setTorrents(torrentsData.torrents);
       }
     } catch (err) {
-      console.warn("Failed to poll torrent list:", err);
+      logger.warn("App:Poll", `Failed to poll torrent list: ${err.message}`);
     }
 
     try {
       const vpnData = await checkVpnStatus();
       setVpnStatus(vpnData);
     } catch (err) {
-      console.warn("Failed to check VPN status:", err);
+      logger.warn("App:Poll", `Failed to check VPN status: ${err.message}`);
     }
   }, []);
 
@@ -139,7 +157,7 @@ export default function App() {
         setWatchlist(data.watchlist);
       }
     } catch (err) {
-      console.warn("Failed to load watchlist:", err);
+      logger.warn("App:Watchlist", `Failed to load watchlist: ${err.message}`);
     }
   }, []);
 
@@ -151,7 +169,7 @@ export default function App() {
           if (data.defaultDir) setDefaultDir(data.defaultDir);
         }
       })
-      .catch((err) => console.warn("Failed to load directories:", err));
+      .catch((err) => logger.warn("App:Dirs", `Failed to load directories: ${err.message}`));
 
     loadTorrentsAndVpn();
     loadWatchlistData();
@@ -178,14 +196,14 @@ export default function App() {
         } else {
           addToast(
             `Found ${data.results.length} release(s) for "${query}"`,
-            "info",
+            "info"
           );
         }
       } else {
         updateUtsState({ results: [], loading: false });
       }
     } catch (err) {
-      console.error("Search error:", err);
+      logger.error("App:Search", `Search error: ${err.message}`);
       addToast(err.message || "Error performing torrent search", "error");
       updateUtsState({ results: [], loading: false });
     }
@@ -209,7 +227,7 @@ export default function App() {
 
     addToast(
       `Adding "${title}" to Wishlist & pre-fetching top 3 torrents...`,
-      "info",
+      "info"
     );
 
     try {
@@ -243,19 +261,20 @@ export default function App() {
     const source =
       torrent.magnetUrl ||
       torrent.downloadUrl ||
-      torrent.id.startsWith("magnet:")
+      (typeof torrent.id === "string" && torrent.id.startsWith("magnet:")
         ? torrent.id
-        : null;
+        : null);
+
     if (!source) {
       addToast(
         "No valid magnet link or download URL for this release",
-        "error",
+        "error"
       );
       return;
     }
 
     try {
-      const result = await addDownload(source, savePath);
+      const result = await addDownload(source, savePath, torrent, torrent.indexer);
       if (result && result.ok) {
         addToast(`Torrent queued to ${savePath}`, "success");
         setSelectedTorrent(null);
@@ -265,7 +284,7 @@ export default function App() {
         addToast(result.error || "Failed to start torrent download", "error");
       }
     } catch (err) {
-      console.error("Download trigger error:", err);
+      logger.error("App:Download", `Download trigger error: ${err.message}`);
       addToast(err.message || "Error queuing torrent download", "error");
     }
   };
@@ -276,6 +295,8 @@ export default function App() {
         vpnStatus={vpnStatus}
         activeCount={torrents.length}
         onToggleDrawer={() => setIsDrawerOpen(true)}
+        isDebug={isDebug}
+        onToggleDebug={handleToggleDebug}
       />
 
       <main className="app-main">

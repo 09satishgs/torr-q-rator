@@ -1,34 +1,77 @@
 /**
- * Frontend API Service Layer
+ * Frontend API Service Layer with Integrated Logging & Metadata Support
  */
 
+import { logger } from './logger';
+
+export async function setBackendDebug(enabled) {
+  try {
+    const response = await fetch('/api/config/debug', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    return await response.json();
+  } catch (e) {
+    logger.warn('API:DebugConfig', `Failed to sync debug state with backend: ${e.message}`);
+  }
+}
+
 export async function searchTorrents(query, limit = 30) {
+  logger.debug('API:Search', `Dispatching search query "${query}" (limit: ${limit})`);
+  const start = performance.now();
   const response = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+  const duration = Math.round(performance.now() - start);
+
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || 'Failed to search torrent releases');
+    const errMsg = errorData.error || errorData.details || 'Failed to search torrent releases';
+    logger.error('API:Search', `Search failed (${duration}ms): ${errMsg}`, errorData);
+    throw new Error(errMsg);
   }
-  return await response.json();
+
+  const data = await response.json();
+  logger.info('API:Search', `Found ${data.count || data.results?.length || 0} results for "${query}" (${duration}ms)`, data);
+  return data;
 }
 
 export async function fetchDirectories() {
+  logger.debug('API:Directories', 'Fetching recommended download directories');
   const response = await fetch('/api/directories');
   if (!response.ok) {
+    logger.error('API:Directories', 'Failed to fetch directories');
     throw new Error('Failed to fetch recommended directories');
   }
-  return await response.json();
+  const data = await response.json();
+  logger.debug('API:Directories', 'Directories loaded', data);
+  return data;
 }
 
-export async function addDownload(source, savePath) {
+export async function addDownload(source, savePath, torrentObject = null, indexer = null) {
+  const payload = {
+    source,
+    savePath,
+    torrentObject,
+    indexer: indexer || torrentObject?.indexer || 'Unknown',
+  };
+
+  logger.info('API:Download', `Queuing download: "${torrentObject?.title || source.slice(0, 60)}"`, payload);
+
   const response = await fetch('/api/download', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source, savePath }),
+    body: JSON.stringify(payload),
   });
-  const data = await response.json();
+
+  const data = await response.json().catch(() => ({ ok: false, error: 'Malformed API response' }));
+
   if (!response.ok || !data.ok) {
-    throw new Error(data.error || 'Failed to queue torrent download');
+    const errMsg = data.error || data.details || 'Failed to queue torrent download';
+    logger.error('API:Download', `Queue failed: ${errMsg}`, data);
+    throw new Error(errMsg);
   }
+
+  logger.info('API:Download', 'Download successfully queued to qBittorrent!', data);
   return data;
 }
 
@@ -37,7 +80,9 @@ export async function fetchTorrentsList() {
   if (!response.ok) {
     throw new Error('Failed to fetch active torrent transfers');
   }
-  return await response.json();
+  const data = await response.json();
+  logger.debug('API:Torrents', `Polled active transfers (${data.torrents?.length || 0} active)`, data);
+  return data;
 }
 
 export async function checkVpnStatus() {
@@ -45,7 +90,9 @@ export async function checkVpnStatus() {
   if (!response.ok) {
     throw new Error('Failed to check VPN status');
   }
-  return await response.json();
+  const data = await response.json();
+  logger.debug('API:VPN', 'VPN status checked', data);
+  return data;
 }
 
 /* Media Discovery & Wishlist API Wrappers */
@@ -70,23 +117,31 @@ export async function searchMediaCatalog({
   if (sort) params.append('sort', sort);
   if (page) params.append('page', page.toString());
 
+  logger.debug('API:Discover', `Querying media catalog [${source}]`, Object.fromEntries(params.entries()));
+
   const response = await fetch(`/api/discover/search?${params.toString()}`);
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
+    logger.error('API:Discover', 'Media query error', errData);
     throw new Error(errData.error || errData.details || 'Failed to query media discovery source');
   }
-  return await response.json();
+  const data = await response.json();
+  logger.debug('API:Discover', `Received ${data.results?.length || 0} discovery items`, data);
+  return data;
 }
 
 export async function fetchWatchlist() {
   const response = await fetch('/api/watchlist');
   if (!response.ok) {
-    throw new Error('Failed to fetch wishlist');
+    throw new Error('Failed to fetch watchlist');
   }
-  return await response.json();
+  const data = await response.json();
+  logger.debug('API:Watchlist', `Loaded ${data.watchlist?.length || 0} wishlist items`);
+  return data;
 }
 
 export async function addWatchlistItem(itemData) {
+  logger.info('API:Watchlist', `Adding item: "${itemData.title || itemData.name}"`, itemData);
   const response = await fetch('/api/watchlist', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -94,12 +149,15 @@ export async function addWatchlistItem(itemData) {
   });
   const data = await response.json();
   if (!response.ok || !data.success) {
+    logger.error('API:Watchlist', 'Add failed', data);
     throw new Error(data.error || 'Failed to add item to wishlist');
   }
+  logger.info('API:Watchlist', 'Item added successfully', data);
   return data;
 }
 
 export async function removeWatchlistItem(id) {
+  logger.info('API:Watchlist', `Removing item ${id}`);
   const response = await fetch(`/api/watchlist/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });

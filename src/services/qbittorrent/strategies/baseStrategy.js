@@ -1,17 +1,20 @@
 const axios = require('axios');
 const config = require('../../../config');
+const logger = require('../../../utils/logger');
 
 class BaseDownloadStrategy {
   constructor(name) {
     this.name = name;
+    this.logger = logger;
   }
 
   /**
-   * Determine whether this strategy is suited to handle the given source URL / input
+   * Determine whether this strategy is suited to handle the given source URL & context metadata
    * @param {string} sourceUrl
+   * @param {Object} context Context containing { indexer, torrentObject, client, ... }
    * @returns {boolean}
    */
-  canHandle(sourceUrl) {
+  canHandle(sourceUrl, context = {}) {
     throw new Error(`Strategy "${this.name}" must implement canHandle()`);
   }
 

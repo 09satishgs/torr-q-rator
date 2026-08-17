@@ -9,10 +9,11 @@ class CloudflareProtectedStrategy extends BaseDownloadStrategy {
   /**
    * Matches general URLs that might require Cloudflare resolution
    */
-  canHandle(sourceUrl) {
+  canHandle(sourceUrl, context = {}) {
     if (!flaresolverrService.enabled) return false;
-    if (!sourceUrl || typeof sourceUrl !== 'string') return false;
-    const trimmed = sourceUrl.trim().toLowerCase();
+    const rawUrl = sourceUrl || context.torrentObject?.downloadUrl || '';
+    if (!rawUrl || typeof rawUrl !== 'string') return false;
+    const trimmed = rawUrl.trim().toLowerCase();
     return (
       (trimmed.startsWith('http://') || trimmed.startsWith('https://')) &&
       !trimmed.endsWith('.torrent') &&
@@ -24,14 +25,18 @@ class CloudflareProtectedStrategy extends BaseDownloadStrategy {
    * Run URL through FlareSolverr, extract magnet or torrent from solved DOM
    */
   async handle(sourceUrl, savePath, context) {
-    const pageUrl = sourceUrl.trim();
-    console.log(`[CloudflareProtectedStrategy] Solving URL with FlareSolverr: ${pageUrl.slice(0, 90)}...`);
+    const pageUrl = (sourceUrl || context.torrentObject?.downloadUrl || '').trim();
+    this.logger.info('CloudflareProtected', `Solving URL with FlareSolverr: ${pageUrl.slice(0, 90)}...`, {
+      indexer: context.indexer,
+      title: context.torrentObject?.title,
+      savePath,
+    });
 
     const result = await flaresolverrService.solveUrl(pageUrl);
     if (result.ok && result.html) {
       const magnet = this.extractMagnetFromHtml(result.html);
       if (magnet) {
-        console.log('[CloudflareProtectedStrategy] Extracted magnet link via FlareSolverr clearance!');
+        this.logger.info('CloudflareProtected', 'Extracted magnet link via FlareSolverr clearance!');
         return await context.client.addTorrentByUrl(magnet, savePath);
       }
 
@@ -43,6 +48,7 @@ class CloudflareProtectedStrategy extends BaseDownloadStrategy {
     }
 
     // Fallback: Dispatch to qBittorrent
+    this.logger.warn('CloudflareProtected', 'FlareSolverr did not extract direct links, delegating to qBittorrent client...');
     return await context.client.addTorrentByUrl(pageUrl, savePath);
   }
 }

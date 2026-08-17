@@ -6,18 +6,23 @@ class DefaultDownloadStrategy extends BaseDownloadStrategy {
   }
 
   /**
-   * Matches any magnet URI format
+   * Matches any magnet URI format or torrentObjects containing a magnet URL
    */
-  canHandle(sourceUrl) {
-    if (!sourceUrl || typeof sourceUrl !== 'string') return false;
-    return sourceUrl.trim().toLowerCase().startsWith('magnet:?');
+  canHandle(sourceUrl, context = {}) {
+    if (sourceUrl && typeof sourceUrl === 'string' && sourceUrl.trim().toLowerCase().startsWith('magnet:?')) {
+      return true;
+    }
+    if (context.torrentObject?.magnetUrl && context.torrentObject.magnetUrl.startsWith('magnet:?')) {
+      return true;
+    }
+    return false;
   }
 
   /**
    * Clean and dispatch magnet link to qBittorrent
    */
   async handle(sourceUrl, savePath, context) {
-    let cleanMagnet = sourceUrl.trim();
+    let cleanMagnet = (sourceUrl || context.torrentObject?.magnetUrl || '').trim();
 
     // Decode HTML entities if any exist (e.g. &amp; -> &)
     cleanMagnet = cleanMagnet.replace(/&amp;/g, '&');
@@ -26,7 +31,12 @@ class DefaultDownloadStrategy extends BaseDownloadStrategy {
     const hashMatch = cleanMagnet.match(/xt=urn:btih:([a-zA-Z0-9]+)/i);
     const hashSnippet = hashMatch ? `[BTIH: ${hashMatch[1].substring(0, 8)}...]` : '';
 
-    console.log(`[DefaultDownloadStrategy] Dispatching magnet URI ${hashSnippet} to qBittorrent...`);
+    this.logger.info('MagnetDefault', `Dispatching magnet URI ${hashSnippet} to qBittorrent`, {
+      savePath,
+      indexer: context.indexer,
+      torrentTitle: context.torrentObject?.title,
+    });
+
     return await context.client.addTorrentByUrl(cleanMagnet, savePath);
   }
 }

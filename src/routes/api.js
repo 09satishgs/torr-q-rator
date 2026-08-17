@@ -8,6 +8,30 @@ const flaresolverrService = require('../services/flaresolverr');
 const discoveryService = require('../services/discovery');
 const watchlistService = require('../services/watchlist');
 const config = require('../config');
+const logger = require('../utils/logger');
+
+/**
+ * GET /api/config/debug
+ * Get backend debug logging status
+ */
+router.get('/config/debug', (req, res) => {
+  return res.json({
+    debug: logger.isDebugEnabled(),
+  });
+});
+
+/**
+ * POST /api/config/debug
+ * Toggle backend debug logging
+ */
+router.post('/config/debug', (req, res) => {
+  const { enabled } = req.body;
+  logger.setDebug(!!enabled);
+  return res.json({
+    success: true,
+    debug: logger.isDebugEnabled(),
+  });
+});
 
 /**
  * GET /api/search?q=ubuntu&limit=20
@@ -18,7 +42,13 @@ router.get('/search', async (req, res) => {
     const query = req.query.q || '';
     const limit = parseInt(req.query.limit || '20', 10);
 
+    logger.info('API:Search', `Searching indexers for query: "${query}" (limit: ${limit})`);
     const results = await prowlarrService.search(query, limit);
+
+    logger.debug('API:Search', `Found ${results.length} results for "${query}"`, {
+      sampleTitles: results.slice(0, 3).map(r => r.title),
+    });
+
     return res.json({
       success: true,
       query,
@@ -26,7 +56,7 @@ router.get('/search', async (req, res) => {
       results,
     });
   } catch (error) {
-    console.error('[API /search] Error:', error.message);
+    logger.error('API:Search', `Failed to perform torrent search: ${error.message}`);
     return res.status(500).json({
       success: false,
       error: 'Failed to perform torrent search',
@@ -41,26 +71,43 @@ router.get('/search', async (req, res) => {
  */
 router.post('/download', async (req, res) => {
   try {
-    const { source, savePath } = req.body;
+    const { source, savePath, torrentObject, indexer } = req.body;
 
-    if (!source) {
+    const rawSource = source || torrentObject?.magnetUrl || torrentObject?.downloadUrl;
+    if (!rawSource) {
+      logger.warn('API:Download', 'Missing torrent source URL or magnet link in request body', req.body);
       return res.status(400).json({
         ok: false,
         error: 'Missing torrent source URL or magnet link',
       });
     }
 
-    const result = (await qbittorrentService.addTorrent(source, savePath)) || {
+    const resolvedIndexer = indexer || torrentObject?.indexer || 'Unknown';
+    logger.info('API:Download', `Processing download request from indexer: "${resolvedIndexer}"`, {
+      source: rawSource.slice(0, 90),
+      savePath,
+      indexer: resolvedIndexer,
+      title: torrentObject?.title,
+      size: torrentObject?.size,
+    });
+
+    const result = (await qbittorrentService.addTorrent(rawSource, savePath, {
+      torrentObject,
+      indexer: resolvedIndexer,
+    })) || {
       ok: false,
       error: 'Download manager returned an empty response',
     };
 
     if (!result.ok) {
+      logger.warn('API:Download', `Download queue failed: ${result.error}`, result);
       return res.status(400).json(result);
     }
+
+    logger.info('API:Download', 'Torrent queued successfully to qBittorrent', result);
     return res.json(result);
   } catch (error) {
-    console.error('[API /download] Error:', error.message);
+    logger.error('API:Download', `Failed to queue torrent download: ${error.message}`);
     return res.status(500).json({
       ok: false,
       error: 'Failed to add torrent download',
@@ -76,13 +123,14 @@ router.post('/download', async (req, res) => {
 router.get('/torrents', async (req, res) => {
   try {
     const torrents = await qbittorrentService.getTorrentList();
+    logger.debug('API:Torrents', `Fetched ${torrents.length} active torrent transfers`);
     return res.json({
       success: true,
       count: torrents.length,
       torrents,
     });
   } catch (error) {
-    console.error('[API /torrents] Error:', error.message);
+    logger.error('API:Torrents', `Failed to fetch active torrent list: ${error.message}`);
     return res.status(500).json({
       success: false,
       error: 'Failed to fetch active torrent list',
@@ -117,6 +165,7 @@ router.get('/vpn/status', async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
+    logger.error('API:VPN', `Failed to check VPN & service status: ${error.message}`);
     return res.status(500).json({
       vpnConnected: false,
       error: error.message,
@@ -183,7 +232,7 @@ router.get('/discover/search', async (req, res) => {
       results: data.results,
     });
   } catch (error) {
-    console.error('[API /discover/search] Error:', error.message);
+    logger.error('API:Discover', `Failed to query media discovery source: ${error.message}`);
     return res.status(500).json({
       success: false,
       error: 'Failed to query media discovery source',
@@ -205,7 +254,7 @@ router.get('/watchlist', (req, res) => {
       watchlist: list,
     });
   } catch (error) {
-    console.error('[API GET /watchlist] Error:', error.message);
+    logger.error('API:Watchlist', `Failed to fetch watchlist: ${error.message}`);
     return res.status(500).json({
       success: false,
       error: 'Failed to fetch watchlist',
@@ -235,7 +284,7 @@ router.post('/watchlist', async (req, res) => {
       item: savedItem,
     });
   } catch (error) {
-    console.error('[API POST /watchlist] Error:', error.message);
+    logger.error('API:Watchlist', `Failed to add item to watchlist: ${error.message}`);
     return res.status(500).json({
       success: false,
       error: 'Failed to add item to watchlist',
@@ -257,7 +306,7 @@ router.delete('/watchlist/:id', (req, res) => {
       message: ok ? 'Item removed from Wishlist' : 'Item not found',
     });
   } catch (error) {
-    console.error('[API DELETE /watchlist] Error:', error.message);
+    logger.error('API:Watchlist', `Failed to delete watchlist item: ${error.message}`);
     return res.status(500).json({
       success: false,
       error: 'Failed to delete watchlist item',
