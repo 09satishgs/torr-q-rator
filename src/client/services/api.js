@@ -1,5 +1,5 @@
 /**
- * Frontend API Service Layer with Integrated Logging & Metadata Support
+ * Frontend API Service Layer with Integrated Logging & Complete Torrent Object Support
  */
 
 import { logger } from './logger';
@@ -47,15 +47,18 @@ export async function fetchDirectories() {
   return data;
 }
 
-export async function addDownload(source, savePath, torrentObject = null, indexer = null) {
+/**
+ * Add Download to qBittorrent - passes the entire Prowlarr torrent object + savePath
+ * @param {Object} torrent Entire Prowlarr result object
+ * @param {string} savePath Target directory path
+ */
+export async function addDownload(torrent, savePath) {
   const payload = {
-    source,
+    torrent,
     savePath,
-    torrentObject,
-    indexer: indexer || torrentObject?.indexer || 'Unknown',
   };
 
-  logger.info('API:Download', `Queuing download: "${torrentObject?.title || source.slice(0, 60)}"`, payload);
+  logger.info('API:Download', `Queuing download for "${torrent?.title || 'Untitled'}" [${torrent?.indexer || 'Unknown'}]`, payload);
 
   const response = await fetch('/api/download', {
     method: 'POST',

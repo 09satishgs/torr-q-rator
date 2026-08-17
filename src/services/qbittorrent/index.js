@@ -18,26 +18,22 @@ class QBittorrentService {
   }
 
   /**
-   * Add a new torrent via modular download strategy pipeline
-   * @param {string} sourceUrl HTML Page URL, Magnet URI, or .torrent link
+   * Add a new torrent via the 3-step download resolution pipeline
+   * @param {Object|string} torrentInput Full Prowlarr torrent result object or URL string
    * @param {string} savePath Target directory (defaults to config)
-   * @param {Object} metadata Extra metadata { torrentObject, indexer }
    */
-  async addTorrent(sourceUrl, savePath, metadata = {}) {
-    const rawSource = sourceUrl || metadata.torrentObject?.magnetUrl || metadata.torrentObject?.downloadUrl;
-    if (!rawSource || typeof rawSource !== 'string') {
-      return { ok: false, error: 'Invalid or missing torrent source URL' };
+  async addTorrent(torrentInput, savePath) {
+    if (!torrentInput) {
+      return { ok: false, error: 'Invalid or missing torrent metadata' };
     }
 
     const targetPath = savePath || config.defaultDownloadDir;
     const context = {
       client: this.client,
       strategyManager: this.strategyManager,
-      torrentObject: metadata.torrentObject || null,
-      indexer: metadata.indexer || metadata.torrentObject?.indexer || null,
     };
 
-    return await this.strategyManager.processDownload(rawSource, targetPath, context);
+    return await this.strategyManager.processDownload(torrentInput, targetPath, context);
   }
 
   /**

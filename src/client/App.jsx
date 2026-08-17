@@ -258,23 +258,13 @@ export default function App() {
   };
 
   const handleConfirmDownload = async (torrent, savePath) => {
-    const source =
-      torrent.magnetUrl ||
-      torrent.downloadUrl ||
-      (typeof torrent.id === "string" && torrent.id.startsWith("magnet:")
-        ? torrent.id
-        : null);
-
-    if (!source) {
-      addToast(
-        "No valid magnet link or download URL for this release",
-        "error"
-      );
+    if (!torrent) {
+      addToast("No torrent release selected", "error");
       return;
     }
 
     try {
-      const result = await addDownload(source, savePath, torrent, torrent.indexer);
+      const result = await addDownload(torrent, savePath);
       if (result && result.ok) {
         addToast(`Torrent queued to ${savePath}`, "success");
         setSelectedTorrent(null);

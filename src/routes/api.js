@@ -67,34 +67,39 @@ router.get('/search', async (req, res) => {
 
 /**
  * POST /api/download
- * Add torrent to qBittorrent using modular strategy pipeline
+ * Add torrent to qBittorrent using 3-step pipeline (Magnet -> .torrent -> Indexer Fallback)
+ * Accepts entire Prowlarr torrent object + savePath
  */
 router.post('/download', async (req, res) => {
   try {
-    const { source, savePath, torrentObject, indexer } = req.body;
+    const { torrent, savePath, source, torrentObject, indexer } = req.body;
 
-    const rawSource = source || torrentObject?.magnetUrl || torrentObject?.downloadUrl;
-    if (!rawSource) {
-      logger.warn('API:Download', 'Missing torrent source URL or magnet link in request body', req.body);
+    // Support both { torrent, savePath } and legacy formats
+    const torrentPayload = torrent || torrentObject || (source ? {
+      title: 'Direct Torrent',
+      indexer: indexer || 'Direct',
+      magnetUrl: source.startsWith('magnet:') ? source : '',
+      downloadUrl: source.startsWith('http') ? source : '',
+      id: source,
+    } : null);
+
+    if (!torrentPayload) {
+      logger.warn('API:Download', 'Missing torrent object in download request', req.body);
       return res.status(400).json({
         ok: false,
-        error: 'Missing torrent source URL or magnet link',
+        error: 'Missing torrent metadata object in request body',
       });
     }
 
-    const resolvedIndexer = indexer || torrentObject?.indexer || 'Unknown';
-    logger.info('API:Download', `Processing download request from indexer: "${resolvedIndexer}"`, {
-      source: rawSource.slice(0, 90),
+    logger.info('API:Download', `Received download request for "${torrentPayload.title || 'Untitled'}" [${torrentPayload.indexer || 'Unknown'}]`, {
+      title: torrentPayload.title,
+      indexer: torrentPayload.indexer,
+      magnetUrl: torrentPayload.magnetUrl ? `${torrentPayload.magnetUrl.slice(0, 50)}...` : '',
+      downloadUrl: torrentPayload.downloadUrl ? `${torrentPayload.downloadUrl.slice(0, 50)}...` : '',
       savePath,
-      indexer: resolvedIndexer,
-      title: torrentObject?.title,
-      size: torrentObject?.size,
     });
 
-    const result = (await qbittorrentService.addTorrent(rawSource, savePath, {
-      torrentObject,
-      indexer: resolvedIndexer,
-    })) || {
+    const result = (await qbittorrentService.addTorrent(torrentPayload, savePath)) || {
       ok: false,
       error: 'Download manager returned an empty response',
     };

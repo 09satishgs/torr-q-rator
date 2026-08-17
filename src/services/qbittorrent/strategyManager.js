@@ -1,66 +1,107 @@
 const defaultDownload = require('./strategies/defaultDownload');
-const limeTorr = require('./strategies/limeTorr');
 const torrDownload = require('./strategies/torrDownload');
-const cloudflareProtected = require('./strategies/cloudflareProtected');
+const indexerRegistry = require('./strategies/indexers/indexerRegistry');
 const logger = require('../../utils/logger');
 
 class StrategyManager {
   constructor() {
-    // Strategy priority pipeline:
-    // 1. Direct Magnet URL
-    // 2. Specific LimeTorrents Indexer / Domain
-    // 3. Direct .torrent Binary / Prowlarr Link
-    // 4. Cloudflare Protected Fallback
-    this.strategies = [
-      defaultDownload,
-      limeTorr,
-      torrDownload,
-      cloudflareProtected,
-    ];
-    this.logger = logger;
+    this.defaultDownload = defaultDownload;
+    this.torrDownload = torrDownload;
+    this.indexerRegistry = indexerRegistry;
   }
 
   /**
-   * Find the most appropriate strategy for a given source URL & context
-   * @param {string} sourceUrl
-   * @param {Object} context { indexer, torrentObject, ... }
+   * Normalize input into a standard Prowlarr-like torrent object
+   * @param {Object|string} input
    */
-  findStrategy(sourceUrl, context = {}) {
-    for (const strategy of this.strategies) {
-      if (strategy.canHandle(sourceUrl, context)) {
-        return strategy;
-      }
+  normalizeTorrentInput(input) {
+    if (!input) return null;
+    if (typeof input === 'string') {
+      const trimmed = input.trim();
+      const isMagnet = trimmed.toLowerCase().startsWith('magnet:?');
+      return {
+        title: 'Direct Torrent',
+        indexer: 'Direct',
+        magnetUrl: isMagnet ? trimmed : '',
+        downloadUrl: !isMagnet && (trimmed.startsWith('http://') || trimmed.startsWith('https://')) ? trimmed : '',
+        id: trimmed,
+      };
     }
-    // Default fallback to magnet/direct URL handler
-    return defaultDownload;
+    return {
+      title: input.title || 'Untitled Torrent',
+      indexer: input.indexer || input.indexerName || 'Unknown',
+      magnetUrl: input.magnetUrl || '',
+      downloadUrl: input.downloadUrl || input.link || '',
+      id: input.id || input.guid || '',
+      size: input.size || 0,
+      seeders: input.seeders || 0,
+      leechers: input.leechers || 0,
+      category: input.category || '',
+    };
   }
 
   /**
-   * Execute a specific strategy by name
+   * Primary download resolution pipeline:
+   * 1. Check for valid magnetUrl -> defaultDownload.js (Magnet queue)
+   * 2. Check for valid downloadUrl -> torrDownload.js (.torrent buffer upload)
+   * 3. Fallback -> Indexer specific js handler with mock logging
+   *
+   * @param {Object|string} torrentInput Full prowlarr torrent object or source
+   * @param {string} savePath Target directory path
+   * @param {Object} context { client }
    */
-  async executeStrategy(name, sourceUrl, savePath, context) {
-    const strategy = this.strategies.find(s => s.name === name);
-    if (!strategy) {
-      throw new Error(`Strategy "${name}" not found in StrategyManager registry`);
+  async processDownload(torrentInput, savePath, context) {
+    const torrent = this.normalizeTorrentInput(torrentInput);
+    if (!torrent) {
+      return { ok: false, error: 'Invalid or missing torrent metadata' };
     }
-    return await strategy.handle(sourceUrl, savePath, context);
-  }
 
-  /**
-   * Resolve and process a torrent download request
-   * @param {string} sourceUrl
-   * @param {string} savePath
-   * @param {Object} context { client, strategyManager, torrentObject, indexer }
-   */
-  async processDownload(sourceUrl, savePath, context) {
-    const strategy = this.findStrategy(sourceUrl, context);
-    this.logger.info('StrategyManager', `Selected strategy "${strategy.name}"`, {
-      source: (sourceUrl || '').slice(0, 80),
-      indexer: context.indexer,
-      title: context.torrentObject?.title,
+    const executionContext = {
+      ...context,
+      torrent,
+    };
+
+    logger.info('StrategyManager', `Initiating download pipeline for "${torrent.title}" [Indexer: ${torrent.indexer}]`, {
+      magnetUrl: torrent.magnetUrl ? `${torrent.magnetUrl.slice(0, 60)}...` : '(none)',
+      downloadUrl: torrent.downloadUrl ? `${torrent.downloadUrl.slice(0, 60)}...` : '(none)',
       savePath,
     });
-    return await strategy.handle(sourceUrl, savePath, context);
+
+    // Step 1: Check for valid magnetUrl
+    if (this.defaultDownload.isValidMagnet(torrent.magnetUrl)) {
+      logger.info('StrategyManager', 'Step 1: Valid magnetUrl detected. Executing MagnetDefault strategy...');
+      try {
+        const magnetResult = await this.defaultDownload.handle(torrent.magnetUrl, savePath, executionContext);
+        if (magnetResult && magnetResult.ok) {
+          logger.info('StrategyManager', 'Magnet download queued successfully via Step 1.');
+          return magnetResult;
+        }
+        logger.warn('StrategyManager', `Step 1 (Magnet) returned unsuccessful result: ${magnetResult?.error || 'unknown'}. Proceeding to next step.`);
+      } catch (err) {
+        logger.warn('StrategyManager', `Step 1 (Magnet) failed with exception (${err.message}). Proceeding to next step.`);
+      }
+    }
+
+    // Step 2: Check for valid downloadUrl (.torrent flow)
+    if (this.torrDownload.isValidUrl(torrent.downloadUrl)) {
+      logger.info('StrategyManager', 'Step 2: Valid downloadUrl detected. Executing TorrentBinary strategy...');
+      try {
+        const torrResult = await this.torrDownload.handle(torrent.downloadUrl, savePath, executionContext);
+        if (torrResult && torrResult.ok) {
+          logger.info('StrategyManager', '.torrent download queued successfully via Step 2.');
+          return torrResult;
+        }
+        logger.warn('StrategyManager', `Step 2 (TorrentBinary) returned unsuccessful result: ${torrResult?.error || 'unknown'}. Proceeding to indexer fallback.`);
+      } catch (err) {
+        logger.warn('StrategyManager', `Step 2 (TorrentBinary) failed with exception (${err.message}). Proceeding to indexer fallback.`);
+      }
+    }
+
+    // Step 3: Both absent or failed -> Search for indexer-specific fallback handler
+    logger.info('StrategyManager', `Step 3: Direct magnet and downloadUrl absent or failed. Querying indexer handler for "${torrent.indexer}"...`);
+    const indexerHandler = this.indexerRegistry.getHandler(torrent.indexer);
+    logger.info('StrategyManager', `Executing indexer fallback handler: "${indexerHandler.name}"`);
+    return await indexerHandler.handle(torrent, savePath, executionContext);
   }
 }
 
