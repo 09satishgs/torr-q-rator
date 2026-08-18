@@ -5,8 +5,12 @@ const fs = require('fs');
 const os = require('os');
 const config = require('./config');
 const apiRoutes = require('./routes/api');
+const seedrService = require('./services/seedr');
 
 const app = express();
+
+// Start Seedr background worker
+seedrService.worker.start();
 
 // Request logging middleware for request visibility
 app.use((req, res, next) => {

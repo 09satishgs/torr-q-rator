@@ -169,3 +169,61 @@ export async function removeWatchlistItem(id) {
   }
   return await response.json();
 }
+
+/* Seedr Cloud Queue API Wrappers */
+
+export async function addSeedrDownload(torrent, savePath) {
+  const payload = { torrent, savePath };
+  logger.info('API:Seedr', `Adding "${torrent?.title || 'Untitled'}" to Seedr Queue`, payload);
+
+  const response = await fetch('/api/seedr/download', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json().catch(() => ({ ok: false, error: 'Malformed response from server' }));
+  if (!response.ok || !data.ok) {
+    const errMsg = data.error || 'Failed to queue torrent to Seedr';
+    logger.error('API:Seedr', `Seedr queue failed: ${errMsg}`, data);
+    throw new Error(errMsg);
+  }
+
+  logger.info('API:Seedr', 'Successfully queued to Seedr!', data);
+  return data;
+}
+
+export async function fetchSeedrQueue() {
+  const response = await fetch('/api/seedr/queue');
+  if (!response.ok) {
+    throw new Error('Failed to fetch Seedr queue');
+  }
+  const data = await response.json();
+  logger.debug('API:Seedr', `Fetched Seedr queue (${data.queue?.length || 0} items)`, data);
+  return data;
+}
+
+export async function cancelSeedrDownload(id) {
+  logger.info('API:Seedr', `Cancelling Seedr task ${id}`);
+  const response = await fetch(`/api/seedr/cancel/${encodeURIComponent(id)}`, {
+    method: 'POST',
+  });
+  const data = await response.json();
+  if (!response.ok || !data.success) {
+    throw new Error(data.error || 'Failed to cancel Seedr task');
+  }
+  return data;
+}
+
+export async function clearCompletedSeedr() {
+  logger.info('API:Seedr', 'Clearing completed items from Seedr queue');
+  const response = await fetch('/api/seedr/clear-completed', {
+    method: 'POST',
+  });
+  const data = await response.json();
+  if (!response.ok || !data.success) {
+    throw new Error(data.error || 'Failed to clear completed Seedr items');
+  }
+  return data;
+}
+

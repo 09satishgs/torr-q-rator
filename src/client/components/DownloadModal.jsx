@@ -109,9 +109,11 @@ export default function DownloadModal({ torrent, directories = [], defaultDir = 
     setIsManualOverride(true);
   };
 
-  const handleConfirm = () => {
+  const isOverSeedrLimit = (torrent?.size || 0) > 5 * 1024 * 1024 * 1024;
+
+  const handleConfirm = (engine = 'qbittorrent') => {
     const finalPath = customPath.trim() || defaultDir;
-    onConfirm(torrent, finalPath);
+    onConfirm(torrent, finalPath, engine);
   };
 
   return (
@@ -135,7 +137,14 @@ export default function DownloadModal({ torrent, directories = [], defaultDir = 
               {torrent.indexer && <span className="indexer-badge-mini">{torrent.indexer}</span>}
             </div>
             <p className="target-title">{torrent.title}</p>
-            <span className="target-size">{formatBytes(torrent.size)}</span>
+            <div className="target-info-footer">
+              <span className="target-size">{formatBytes(torrent.size)}</span>
+              {isOverSeedrLimit && (
+                <span className="seedr-limit-badge" title="Exceeds Seedr Free 5GB limit">
+                  <i className="fa-solid fa-triangle-exclamation"></i> &gt; 5GB (qBittorrent only)
+                </span>
+              )}
+            </div>
           </div>
 
           {/* 1. Base Folder Selection */}
@@ -232,19 +241,43 @@ export default function DownloadModal({ torrent, directories = [], defaultDir = 
             </div>
             <span className="form-hint">
               {isManualOverride
-                ? 'Manual override active: Exact path sent to qBittorrent.'
+                ? 'Manual override active: Exact path sent to download client.'
                 : 'Auto-composed from Base Directory + Subfolder.'}
             </span>
           </div>
+
+          {/* Seedr 5GB warning notice if applicable */}
+          {isOverSeedrLimit && (
+            <div className="seedr-warning-box">
+              <i className="fa-solid fa-circle-info"></i>
+              <span>This file exceeds the 5GB Seedr limit. You can still download it via qBittorrent.</span>
+            </div>
+          )}
         </div>
 
-        <div className="modal-footer">
+        <div className="modal-footer modal-footer-dual">
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="btn btn-primary" onClick={handleConfirm}>
-            <i className="fa-solid fa-download"></i> Start Download
-          </button>
+          <div className="download-action-group">
+            <button
+              type="button"
+              className="btn btn-seedr"
+              disabled={isOverSeedrLimit}
+              onClick={() => handleConfirm('seedr')}
+              title={isOverSeedrLimit ? 'Exceeds 5GB Seedr free limit' : 'Add to Seedr Cloud Queue'}
+            >
+              <i className="fa-solid fa-bolt"></i> Add to Seedr
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => handleConfirm('qbittorrent')}
+              title="Download via local qBittorrent"
+            >
+              <i className="fa-solid fa-download"></i> qBittorrent
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -7,6 +7,7 @@ const qbittorrentService = require('../services/qbittorrent');
 const flaresolverrService = require('../services/flaresolverr');
 const discoveryService = require('../services/discovery');
 const watchlistService = require('../services/watchlist');
+const seedrService = require('../services/seedr');
 const config = require('../config');
 const logger = require('../utils/logger');
 
@@ -142,6 +143,146 @@ router.get('/torrents', async (req, res) => {
     });
   }
 });
+
+/**
+ * POST /api/seedr/download
+ * Add torrent/magnet to Seedr Queue
+ * Expects { torrent: Object, savePath: String }
+ */
+router.post('/seedr/download', async (req, res) => {
+  try {
+    const { torrent, savePath } = req.body;
+
+    if (!torrent || typeof torrent !== 'object') {
+      logger.error('API:SeedrDownload', 'Missing or invalid "torrent" object in request body');
+      return res.status(400).json({
+        ok: false,
+        error: 'Request body must contain a valid "torrent" object',
+      });
+    }
+
+    if (!savePath || typeof savePath !== 'string') {
+      logger.error('API:SeedrDownload', 'Missing or invalid "savePath" string in request body');
+      return res.status(400).json({
+        ok: false,
+        error: 'Request body must contain a valid "savePath" string',
+      });
+    }
+
+    logger.info('API:SeedrDownload', `Incoming Seedr queue request for "${torrent.title || 'Untitled'}" [${torrent.indexer || 'Unknown'}]`, {
+      torrent,
+      savePath,
+    });
+
+    const item = seedrService.queue.addItem(torrent, savePath);
+
+    // Trigger immediate background worker check to start item without waiting 5 minutes
+    seedrService.worker.triggerCheck().catch(err => {
+      logger.warn('API:SeedrDownload', `Immediate worker check error: ${err.message}`);
+    });
+
+    return res.json({
+      ok: true,
+      message: 'Torrent added to Seedr Queue successfully',
+      item,
+    });
+  } catch (error) {
+    logger.error('API:SeedrDownload', `Exception while queueing to Seedr: ${error.message}`);
+    return res.status(400).json({
+      ok: false,
+      error: error.message || 'Failed to add torrent to Seedr Queue',
+    });
+  }
+});
+
+/**
+ * GET /api/seedr/queue
+ * Fetch all Seedr queued, active, and completed transfer items + cloud quota info
+ */
+router.get('/seedr/queue', async (req, res) => {
+  try {
+    const queue = seedrService.queue.getQueue();
+    const activeItem = seedrService.queue.getActiveItem();
+
+    // Optionally query Seedr account storage info if configured
+    let spaceInfo = {
+      spaceMax: config.seedr.maxSizeBytes,
+      spaceUsed: 0,
+      spaceFree: config.seedr.maxSizeBytes,
+    };
+
+    try {
+      if (config.seedr.token || (config.seedr.username && config.seedr.password)) {
+        const root = await seedrService.client.getFolder(0);
+        spaceInfo = {
+          spaceMax: root.spaceMax,
+          spaceUsed: root.spaceUsed,
+          spaceFree: root.spaceFree,
+        };
+      }
+    } catch (_) {}
+
+    return res.json({
+      success: true,
+      count: queue.length,
+      queue,
+      activeItem,
+      ...spaceInfo,
+    });
+  } catch (error) {
+    logger.error('API:SeedrQueue', `Failed to fetch Seedr queue: ${error.message}`);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch Seedr queue',
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/seedr/cancel/:id
+ * Cancel an active or queued Seedr transfer
+ */
+router.post('/seedr/cancel/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await seedrService.worker.cancelTask(id, 'Cancelled from UI');
+    return res.json({
+      success: true,
+      message: 'Task cancelled successfully',
+      ...result,
+    });
+  } catch (error) {
+    logger.error('API:SeedrCancel', `Failed to cancel Seedr task: ${error.message}`);
+    return res.status(400).json({
+      success: false,
+      error: error.message || 'Failed to cancel Seedr task',
+    });
+  }
+});
+
+/**
+ * POST /api/seedr/clear-completed
+ * Clear completed and cancelled tasks from Seedr queue
+ */
+router.post('/seedr/clear-completed', (req, res) => {
+  try {
+    const remaining = seedrService.queue.clearCompleted();
+    return res.json({
+      success: true,
+      message: 'Completed tasks cleared from Seedr queue',
+      count: remaining.length,
+      queue: remaining,
+    });
+  } catch (error) {
+    logger.error('API:SeedrClearCompleted', `Failed to clear completed items: ${error.message}`);
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 
 /**
  * GET /api/vpn/status

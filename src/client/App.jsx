@@ -21,6 +21,10 @@ import {
   addWatchlistItem,
   removeWatchlistItem,
   setBackendDebug,
+  addSeedrDownload,
+  fetchSeedrQueue,
+  cancelSeedrDownload,
+  clearCompletedSeedr,
 } from "./services/api";
 
 export default function App() {
@@ -84,6 +88,8 @@ export default function App() {
 
   const [watchlist, setWatchlist] = useState([]);
   const [torrents, setTorrents] = useState([]);
+  const [seedrQueue, setSeedrQueue] = useState([]);
+  const [seedrSpace, setSeedrSpace] = useState(null);
   const [vpnStatus, setVpnStatus] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
@@ -150,6 +156,22 @@ export default function App() {
     }
   }, []);
 
+  const loadSeedrData = useCallback(async () => {
+    try {
+      const data = await fetchSeedrQueue();
+      if (data && Array.isArray(data.queue)) {
+        setSeedrQueue(data.queue);
+        setSeedrSpace({
+          spaceMax: data.spaceMax,
+          spaceUsed: data.spaceUsed,
+          spaceFree: data.spaceFree,
+        });
+      }
+    } catch (err) {
+      logger.warn("App:SeedrPoll", `Failed to poll Seedr queue: ${err.message}`);
+    }
+  }, []);
+
   const loadWatchlistData = useCallback(async () => {
     try {
       const data = await fetchWatchlist();
@@ -172,11 +194,15 @@ export default function App() {
       .catch((err) => logger.warn("App:Dirs", `Failed to load directories: ${err.message}`));
 
     loadTorrentsAndVpn();
+    loadSeedrData();
     loadWatchlistData();
 
-    const interval = setInterval(loadTorrentsAndVpn, 3000);
+    const interval = setInterval(() => {
+      loadTorrentsAndVpn();
+      loadSeedrData();
+    }, 3000);
     return () => clearInterval(interval);
-  }, [loadTorrentsAndVpn, loadWatchlistData]);
+  }, [loadTorrentsAndVpn, loadSeedrData, loadWatchlistData]);
 
   /**
    * Execute Torrent Search and Navigate to /search HashRoute
@@ -257,16 +283,35 @@ export default function App() {
     setSelectedTorrent(torrent);
   };
 
-  const handleConfirmDownload = async (torrent, savePath) => {
+  const handleConfirmDownload = async (torrent, savePath, engine = 'qbittorrent') => {
     if (!torrent) {
       addToast("No torrent release selected", "error");
       return;
     }
 
+    if (engine === 'seedr') {
+      try {
+        const result = await addSeedrDownload(torrent, savePath);
+        if (result && result.ok) {
+          addToast(`"${torrent.title || 'Torrent'}" added to Seedr Queue!`, "success");
+          setSelectedTorrent(null);
+          loadSeedrData();
+          setIsDrawerOpen(true);
+        } else {
+          addToast(result.error || "Failed to add to Seedr", "error");
+        }
+      } catch (err) {
+        logger.error("App:SeedrDownload", `Seedr queue trigger error: ${err.message}`);
+        addToast(err.message || "Error adding to Seedr queue", "error");
+      }
+      return;
+    }
+
+    // Default qBittorrent path
     try {
       const result = await addDownload(torrent, savePath);
       if (result && result.ok) {
-        addToast(`Torrent queued to ${savePath}`, "success");
+        addToast(`Torrent queued to qBittorrent (${savePath})`, "success");
         setSelectedTorrent(null);
         loadTorrentsAndVpn();
         setIsDrawerOpen(true);
@@ -279,11 +324,38 @@ export default function App() {
     }
   };
 
+  const handleCancelSeedr = async (id) => {
+    try {
+      await cancelSeedrDownload(id);
+      addToast("Seedr task cancelled", "info");
+      loadSeedrData();
+    } catch (err) {
+      addToast(err.message || "Failed to cancel Seedr task", "error");
+    }
+  };
+
+  const handleClearCompletedSeedr = async () => {
+    try {
+      await clearCompletedSeedr();
+      addToast("Finished Seedr tasks cleared", "success");
+      loadSeedrData();
+    } catch (err) {
+      addToast(err.message || "Failed to clear Seedr tasks", "error");
+    }
+  };
+
+  const activeSeedrCount = seedrQueue.filter((item) =>
+    ["queued", "started", "downloading_seedr", "downloading_local"].includes(
+      item.status
+    )
+  ).length;
+  const totalActiveTransfers = torrents.length + activeSeedrCount;
+
   return (
     <>
       <Header
         vpnStatus={vpnStatus}
-        activeCount={torrents.length}
+        activeCount={totalActiveTransfers}
         onToggleDrawer={() => setIsDrawerOpen(true)}
         isDebug={isDebug}
         onToggleDebug={handleToggleDebug}
@@ -366,6 +438,10 @@ export default function App() {
       <TransfersDrawer
         isOpen={isDrawerOpen}
         torrents={torrents}
+        seedrQueue={seedrQueue}
+        seedrSpace={seedrSpace}
+        onCancelSeedr={handleCancelSeedr}
+        onClearCompletedSeedr={handleClearCompletedSeedr}
         onClose={() => setIsDrawerOpen(false)}
       />
 
@@ -375,3 +451,4 @@ export default function App() {
     </>
   );
 }
+

@@ -36,6 +36,13 @@ const config = {
     addresses: process.env.SURFSHARK_WIREGUARD_ADDRESSES || '',
     interfaceName: process.env.VPN_INTERFACE_NAME || 'SurfsharkWireGuard',
   },
+  seedr: {
+    username: process.env.SEEDR_USERNAME || '',
+    password: process.env.SEEDR_PASSWORD || '',
+    token: process.env.SEEDR_TOKEN || '',
+    maxSizeBytes: parseInt(process.env.SEEDR_MAX_SIZE_BYTES || String(5 * 1024 * 1024 * 1024), 10), // 5GB free tier limit
+    checkIntervalMs: parseInt(process.env.SEEDR_CHECK_INTERVAL_MS || String(5 * 60 * 1000), 10), // 5 minutes
+  },
   defaultDownloadDir: getDefaultDownloadDir(),
 };
 
