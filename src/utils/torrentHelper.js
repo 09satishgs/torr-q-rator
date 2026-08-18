@@ -62,7 +62,7 @@ class TorrentHelper {
 
   /**
    * Resolve a downloadUrl or torrent metadata into a valid Magnet URI
-   * @param {Object} item { title, magnetUrl, downloadUrl }
+   * @param {Object} item { title, magnetUrl, downloadUrl, id, indexer }
    * @returns {Promise<{ magnetUrl: string|null, fileBuffer: Buffer|null }>}
    */
   async resolveMagnet(item) {
@@ -83,17 +83,17 @@ class TorrentHelper {
       return { magnetUrl: item.downloadUrl.trim(), fileBuffer: null };
     }
 
-    // 2. Fetch download URL
+    // 2. Fetch download URL with redirect-aware loop
     if (item.downloadUrl && (item.downloadUrl.startsWith('http://') || item.downloadUrl.startsWith('https://'))) {
-      let url = item.downloadUrl.trim();
+      let currentUrl = item.downloadUrl.trim();
 
       // Inject Prowlarr API key if needed
-      if (url.includes('prowlarr') && config.prowlarr.apiKey && !url.includes('apikey=')) {
-        const sep = url.includes('?') ? '&' : '?';
-        url = `${url}${sep}apikey=${config.prowlarr.apiKey}`;
+      if (currentUrl.includes('prowlarr') && config.prowlarr.apiKey && !currentUrl.includes('apikey=')) {
+        const sep = currentUrl.includes('?') ? '&' : '?';
+        currentUrl = `${currentUrl}${sep}apikey=${config.prowlarr.apiKey}`;
       }
 
-      logger.info('TorrentHelper', `Fetching torrent payload from URL: ${url.substring(0, 80)}...`);
+      logger.info('TorrentHelper', `Fetching torrent payload from URL: ${currentUrl.substring(0, 80)}...`);
 
       const headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -103,30 +103,76 @@ class TorrentHelper {
         headers['X-Api-Key'] = config.prowlarr.apiKey;
       }
 
-      const response = await axios.get(url, {
-        headers,
-        responseType: 'arraybuffer',
-        timeout: 20000,
-        maxRedirects: 5,
-      });
+      let redirectCount = 0;
+      const maxRedirects = 6;
 
-      const buffer = Buffer.from(response.data);
-      const textSample = buffer.slice(0, 500).toString('utf8').trim();
+      while (redirectCount < maxRedirects) {
+        try {
+          const response = await axios.get(currentUrl, {
+            headers,
+            responseType: 'arraybuffer',
+            timeout: 20000,
+            maxRedirects: 0,
+            validateStatus: (status) => status >= 200 && status < 400,
+          });
 
-      if (textSample.startsWith('magnet:?')) {
-        logger.info('TorrentHelper', 'Endpoint returned Magnet URI redirect text');
-        return { magnetUrl: textSample, fileBuffer: buffer };
-      }
+          // Check if response is an HTTP redirect (301, 302, 303, 307, 308)
+          if (response.status >= 300 && response.status < 400 && response.headers.location) {
+            const redirectLoc = response.headers.location.trim();
+            logger.info('TorrentHelper', `Detected HTTP ${response.status} redirect -> ${redirectLoc.substring(0, 60)}...`);
 
-      if (buffer.length > 0) {
-        const infoHash = this.extractInfoHash(buffer);
-        if (infoHash) {
-          const titleEncoded = encodeURIComponent(item.title || 'Torrent');
-          const generatedMagnet = `magnet:?xt=urn:btih:${infoHash}&dn=${titleEncoded}`;
-          logger.info('TorrentHelper', `Extracted BTIH InfoHash [${infoHash.substring(0, 10)}...] -> Generated Magnet URI`);
-          return { magnetUrl: generatedMagnet, fileBuffer: buffer };
+            if (redirectLoc.toLowerCase().startsWith('magnet:?')) {
+              logger.info('TorrentHelper', 'Redirect location is a Magnet URI! Resolved successfully.');
+              return { magnetUrl: redirectLoc, fileBuffer: null };
+            }
+
+            if (redirectLoc.startsWith('http://') || redirectLoc.startsWith('https://')) {
+              currentUrl = redirectLoc;
+            } else {
+              currentUrl = new URL(redirectLoc, currentUrl).toString();
+            }
+            redirectCount++;
+            continue;
+          }
+
+          // 200 OK Response
+          const buffer = Buffer.from(response.data);
+          const textSample = buffer.slice(0, 500).toString('utf8').trim();
+
+          if (textSample.toLowerCase().startsWith('magnet:?')) {
+            logger.info('TorrentHelper', 'Endpoint returned Magnet URI text in body');
+            return { magnetUrl: textSample, fileBuffer: buffer };
+          }
+
+          if (buffer.length > 0) {
+            const infoHash = this.extractInfoHash(buffer);
+            if (infoHash) {
+              const titleEncoded = encodeURIComponent(item.title || 'Torrent');
+              const generatedMagnet = `magnet:?xt=urn:btih:${infoHash}&dn=${titleEncoded}`;
+              logger.info('TorrentHelper', `Extracted BTIH InfoHash [${infoHash.substring(0, 10)}...] -> Generated Magnet URI`);
+              return { magnetUrl: generatedMagnet, fileBuffer: buffer };
+            }
+            return { magnetUrl: null, fileBuffer: buffer };
+          }
+
+          break;
+        } catch (err) {
+          // Catch potential Axios error if it attempted to redirect to a magnet: URL
+          const locationHeader = err.response?.headers?.location;
+          if (locationHeader && locationHeader.trim().toLowerCase().startsWith('magnet:?')) {
+            logger.info('TorrentHelper', 'Extracted Magnet URI from error response location header');
+            return { magnetUrl: locationHeader.trim(), fileBuffer: null };
+          }
+
+          const msgMatch = err.message && err.message.match(/magnet:\?[^\s'"]+/i);
+          if (msgMatch && msgMatch[0]) {
+            logger.info('TorrentHelper', 'Extracted Magnet URI from error message');
+            return { magnetUrl: msgMatch[0], fileBuffer: null };
+          }
+
+          logger.warn('TorrentHelper', `Error fetching URL "${currentUrl.substring(0, 60)}...": ${err.message}`);
+          throw err;
         }
-        return { magnetUrl: null, fileBuffer: buffer };
       }
     }
 
