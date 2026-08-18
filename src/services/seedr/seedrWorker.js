@@ -3,6 +3,7 @@ const logger = require('../../utils/logger');
 const seedrClient = require('./seedrClient');
 const seedrQueue = require('./seedrQueue');
 const seedrDownloader = require('./seedrDownloader');
+const torrentHelper = require('../../utils/torrentHelper');
 const path = require('path');
 
 class SeedrWorker {
@@ -280,19 +281,25 @@ class SeedrWorker {
         return;
       }
 
-      // Upload magnet or torrent to Seedr
+      // Resolve magnet URL or fetch torrent payload
+      logger.info('SeedrWorker', `Resolving magnet / download URI for "${nextItem.title}"...`);
+      const { magnetUrl } = await torrentHelper.resolveMagnet(nextItem);
+
       let uploadResult = null;
-      if (nextItem.magnetUrl && nextItem.magnetUrl.startsWith('magnet:?')) {
-        uploadResult = await seedrClient.addMagnet(nextItem.magnetUrl);
-      } else if (nextItem.downloadUrl) {
-        uploadResult = await seedrClient.addTorrentUrl(nextItem.downloadUrl);
+      if (magnetUrl && magnetUrl.startsWith('magnet:?')) {
+        logger.info('SeedrWorker', `Dispatching resolved Magnet URI to Seedr API...`);
+        uploadResult = await seedrClient.addMagnet(magnetUrl);
+      } else if (nextItem.downloadUrl && (nextItem.downloadUrl.startsWith('http://') || nextItem.downloadUrl.startsWith('https://'))) {
+        logger.info('SeedrWorker', `Dispatching direct URL to Seedr API...`);
+        uploadResult = await seedrClient.addUrl(nextItem.downloadUrl);
       } else {
-        throw new Error('No valid magnetUrl or downloadUrl found on queued item');
+        throw new Error('Unable to resolve a valid Magnet URI or accessible download URL for Seedr');
       }
 
       const seedrId = uploadResult?.userTorrentId || uploadResult?.id || null;
       seedrQueue.updateItem(nextItem.id, {
         status: 'started',
+        magnetUrl: magnetUrl || nextItem.magnetUrl,
         seedrTorrentId: seedrId,
         startedAt: Date.now(),
         error: null,

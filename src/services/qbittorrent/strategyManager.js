@@ -39,6 +39,14 @@ class StrategyManager {
       savePath,
     });
 
+    // Special check for "The Pirate Bay": check for magnetUrl under field "id"
+    const isTPB = (torrent.indexer && /the\s*pirate\s*bay/i.test(torrent.indexer)) ||
+                  (typeof torrent.id === 'string' && torrent.id.trim().toLowerCase().startsWith('magnet:?'));
+    if (isTPB && typeof torrent.id === 'string' && torrent.id.trim().toLowerCase().startsWith('magnet:?')) {
+      logger.info('StrategyManager', 'Detected "The Pirate Bay" indexer with magnet in "id" field. Using as magnetUrl.');
+      torrent.magnetUrl = torrent.id.trim();
+    }
+
     // Step 1: Check for valid magnetUrl
     const hasMagnet = this.defaultDownload.isValidMagnet(torrent.magnetUrl);
     if (hasMagnet) {

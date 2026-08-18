@@ -62,7 +62,18 @@ class ProwlarrService {
    * Normalize Prowlarr result item
    */
   normalizeResult(item, index) {
-    const rawMagnet = item.magnetUrl || item.infoUrl || '';
+    let rawMagnet = item.magnetUrl || item.infoUrl || '';
+
+    // Check for "The Pirate Bay" indexer where magnet is stored under "id" or "guid"
+    const isTPB = (item.indexer && /the\s*pirate\s*bay/i.test(item.indexer)) ||
+                  (item.indexerName && /the\s*pirate\s*bay/i.test(item.indexerName));
+
+    if ((isTPB || !rawMagnet) && typeof item.id === 'string' && item.id.trim().toLowerCase().startsWith('magnet:?')) {
+      rawMagnet = item.id.trim();
+    } else if ((isTPB || !rawMagnet) && typeof item.guid === 'string' && item.guid.trim().toLowerCase().startsWith('magnet:?')) {
+      rawMagnet = item.guid.trim();
+    }
+
     const isMagnet = typeof rawMagnet === 'string' && rawMagnet.startsWith('magnet:?');
     const magnetUrl = isMagnet ? rawMagnet : '';
 

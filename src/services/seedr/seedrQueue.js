@@ -76,12 +76,19 @@ class SeedrQueue {
 
     const list = this.getQueue();
 
+    let magnetUrl = torrent.magnetUrl || '';
+    const isTPB = (torrent.indexer && /the\s*pirate\s*bay/i.test(torrent.indexer)) ||
+                  (typeof torrent.id === 'string' && torrent.id.trim().toLowerCase().startsWith('magnet:?'));
+    if ((isTPB || !magnetUrl) && typeof torrent.id === 'string' && torrent.id.trim().toLowerCase().startsWith('magnet:?')) {
+      magnetUrl = torrent.id.trim();
+    }
+
     const newItem = {
       id: `seedr-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       title: torrent.title || 'Untitled Torrent',
       size: torrent.size || 0,
       indexer: torrent.indexer || 'Unknown',
-      magnetUrl: torrent.magnetUrl || '',
+      magnetUrl: magnetUrl,
       downloadUrl: torrent.downloadUrl || '',
       savePath: savePath,
       status: 'queued', // 'queued' | 'started' | 'downloading_seedr' | 'downloading_local' | 'completed' | 'failed' | 'cancelled'

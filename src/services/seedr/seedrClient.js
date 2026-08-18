@@ -107,21 +107,21 @@ class SeedrClient {
    * Add a magnet link to Seedr
    */
   async addMagnet(magnetUrl) {
-    logger.info('SeedrClient', `Adding magnet to Seedr: ${magnetUrl.substring(0, 60)}...`);
+    logger.info('SeedrClient', `Adding magnet to Seedr: ${magnetUrl.substring(0, 70)}...`);
     const data = await this.request('POST', '/transfer/magnet', { magnet: magnetUrl });
     
     // Seedr response can be { result: true, user_torrent_id: 123 } or { result: false, error: '...' }
-    if (data && (data.result === true || data.user_torrent_id || data.title)) {
+    if (data && (data.result === true || data.user_torrent_id || data.title || data.id)) {
       return {
         ok: true,
-        userTorrentId: data.user_torrent_id || data.id,
+        userTorrentId: data.user_torrent_id || data.id || null,
         title: data.title || '',
         code: data.code || 200,
         raw: data,
       };
     }
 
-    if (data && data.result === 'not_enough_space') {
+    if (data && (data.result === 'not_enough_space' || data.error === 'not_enough_space')) {
       throw new Error('Seedr account does not have enough free space for this torrent (5GB max).');
     }
 
@@ -133,12 +133,16 @@ class SeedrClient {
   }
 
   /**
-   * Add a .torrent download URL to Seedr
+   * Add a public web download URL to Seedr
    */
-  async addTorrentUrl(torrentUrl) {
-    logger.info('SeedrClient', `Adding torrent URL to Seedr: ${torrentUrl.substring(0, 60)}...`);
-    const data = await this.request('POST', '/transfer/torrent', { torrent_url: torrentUrl });
-    return data;
+  async addUrl(url) {
+    logger.info('SeedrClient', `Adding direct URL to Seedr: ${url.substring(0, 70)}...`);
+    const data = await this.request('POST', '/transfer/url', { url });
+    return {
+      ok: true,
+      userTorrentId: data?.user_torrent_id || data?.id || null,
+      raw: data,
+    };
   }
 
   /**
