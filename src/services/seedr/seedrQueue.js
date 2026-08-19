@@ -150,6 +150,40 @@ class SeedrQueue {
   }
 
   /**
+   * Re-add a failed or cancelled item back to the queue
+   */
+  retryItem(id) {
+    const item = this.getItem(id);
+    if (!item) return null;
+
+    logger.info('SeedrQueue', `Re-queueing item "${item.title}" (${id}) for retry`);
+    return this.updateItem(id, {
+      status: 'queued',
+      error: null,
+      progress: 0,
+      speed: 0,
+      startedAt: null,
+      completedAt: null,
+    });
+  }
+
+  /**
+   * Permanently delete an item from the queue
+   */
+  deleteItem(id) {
+    let list = this.getQueue();
+    const beforeCount = list.length;
+    list = list.filter(item => item.id !== id);
+    
+    if (list.length !== beforeCount) {
+      this.saveQueue(list);
+      logger.info('SeedrQueue', `Permanently deleted task ${id} from queue`);
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Get currently active item in Seedr (if any)
    */
   getActiveItem() {

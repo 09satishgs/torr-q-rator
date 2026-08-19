@@ -24,6 +24,8 @@ import {
   addSeedrDownload,
   fetchSeedrQueue,
   cancelSeedrDownload,
+  retrySeedrDownload,
+  deleteSeedrDownload,
   clearCompletedSeedr,
 } from "./services/api";
 
@@ -334,6 +336,26 @@ export default function App() {
     }
   };
 
+  const handleRetrySeedr = async (id) => {
+    try {
+      await retrySeedrDownload(id);
+      addToast("Task re-added to Seedr queue!", "success");
+      loadSeedrData();
+    } catch (err) {
+      addToast(err.message || "Failed to retry Seedr task", "error");
+    }
+  };
+
+  const handleDeleteSeedr = async (id) => {
+    try {
+      await deleteSeedrDownload(id);
+      addToast("Task removed from Seedr queue", "info");
+      loadSeedrData();
+    } catch (err) {
+      addToast(err.message || "Failed to delete Seedr task", "error");
+    }
+  };
+
   const handleClearCompletedSeedr = async () => {
     try {
       await clearCompletedSeedr();
@@ -441,6 +463,8 @@ export default function App() {
         seedrQueue={seedrQueue}
         seedrSpace={seedrSpace}
         onCancelSeedr={handleCancelSeedr}
+        onRetrySeedr={handleRetrySeedr}
+        onDeleteSeedr={handleDeleteSeedr}
         onClearCompletedSeedr={handleClearCompletedSeedr}
         onClose={() => setIsDrawerOpen(false)}
       />

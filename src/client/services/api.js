@@ -215,6 +215,30 @@ export async function cancelSeedrDownload(id) {
   return data;
 }
 
+export async function retrySeedrDownload(id) {
+  logger.info('API:Seedr', `Retrying Seedr task ${id}`);
+  const response = await fetch(`/api/seedr/retry/${encodeURIComponent(id)}`, {
+    method: 'POST',
+  });
+  const data = await response.json();
+  if (!response.ok || !data.success) {
+    throw new Error(data.error || 'Failed to retry Seedr task');
+  }
+  return data;
+}
+
+export async function deleteSeedrDownload(id) {
+  logger.info('API:Seedr', `Permanently deleting Seedr task ${id}`);
+  const response = await fetch(`/api/seedr/item/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  const data = await response.json();
+  if (!response.ok || !data.success) {
+    throw new Error(data.error || 'Failed to delete Seedr task');
+  }
+  return data;
+}
+
 export async function clearCompletedSeedr() {
   logger.info('API:Seedr', 'Clearing completed items from Seedr queue');
   const response = await fetch('/api/seedr/clear-completed', {
@@ -226,4 +250,5 @@ export async function clearCompletedSeedr() {
   }
   return data;
 }
+
 

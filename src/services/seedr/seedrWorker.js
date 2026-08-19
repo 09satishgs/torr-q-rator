@@ -115,7 +115,7 @@ class SeedrWorker {
 
       // Case B: Cloud download finished! We have completed folders or files in Seedr cloud
       if (folders.length > 0 || files.length > 0) {
-        logger.info('SeedrWorker', `Task "${item.title}" completed in Seedr cloud! (Found ${folders.length} folder(s), ${files.length} file(s)). Starting local ZIP download...`);
+        logger.info('SeedrWorker', `Task "${item.title}" completed in Seedr cloud! (Found ${folders.length} folder(s), ${files.length} file(s)). Starting local download...`);
         seedrQueue.updateItem(item.id, {
           status: 'downloading_local',
         });
@@ -125,40 +125,79 @@ class SeedrWorker {
         const destinationDir = item.savePath || config.defaultDownloadDir;
 
         try {
-          // 1. Download every folder from Seedr cloud as a ZIP file
+          // 1. Process and download each folder in Seedr cloud
           for (const folder of folders) {
-            logger.info('SeedrWorker', `Downloading folder "${folder.name}" (ID: ${folder.id}) as ZIP...`);
-            const zipDownloadInfo = await seedrClient.getFolderZipDownload(folder.id);
-            const zipFileName = `${folder.name || item.title || 'download'}.zip`;
+            const folderName = folder.name || folder.fullname || item.title || 'download';
+            logger.info('SeedrWorker', `Inspecting folder "${folderName}" (ID: ${folder.id})...`);
 
-            await seedrDownloader.downloadFile(
-              zipDownloadInfo.url,
-              destinationDir,
-              zipFileName,
-              (progressData) => {
-                seedrQueue.updateItem(item.id, {
-                  progress: progressData.percent,
-                  speed: progressData.speed,
-                });
-              },
-              this.activeAbortController,
-              zipDownloadInfo.headers
-            );
+            let folderDetails = null;
+            try {
+              folderDetails = await seedrClient.getFolder(folder.id);
+            } catch (folderInspectErr) {
+              logger.warn('SeedrWorker', `Could not inspect folder ${folder.id} contents: ${folderInspectErr.message}`);
+            }
 
-            // Delete folder from Seedr cloud to free quota
-            logger.info('SeedrWorker', `ZIP download completed. Deleting folder "${folder.name}" (ID: ${folder.id}) from Seedr cloud...`);
+            const folderFiles = folderDetails?.files || [];
+
+            if (folderFiles.length > 0) {
+              logger.info('SeedrWorker', `Folder "${folderName}" has ${folderFiles.length} file(s). Downloading direct files...`);
+              const targetFolderDir = folderFiles.length > 1 ? path.join(destinationDir, folderName) : destinationDir;
+
+              for (const subFile of folderFiles) {
+                const subFileName = subFile.name || 'file';
+                logger.info('SeedrWorker', `Downloading file "${subFileName}" (ID: ${subFile.id || subFile.folder_file_id})...`);
+                const fileDownloadInfo = await seedrClient.getFileDownload(subFile.id || subFile.folder_file_id);
+
+                await seedrDownloader.downloadFile(
+                  fileDownloadInfo.url,
+                  targetFolderDir,
+                  subFileName,
+                  (progressData) => {
+                    seedrQueue.updateItem(item.id, {
+                      progress: progressData.percent,
+                      speed: progressData.speed,
+                    });
+                  },
+                  this.activeAbortController,
+                  fileDownloadInfo.headers
+                );
+              }
+            } else {
+              // Fallback: Download whole folder archive as zip
+              logger.info('SeedrWorker', `Downloading folder "${folderName}" (ID: ${folder.id}) as ZIP archive...`);
+              const zipDownloadInfo = await seedrClient.getFolderZipDownload(folder.id);
+              const zipFileName = `${folderName}.zip`;
+
+              await seedrDownloader.downloadFile(
+                zipDownloadInfo.url,
+                destinationDir,
+                zipFileName,
+                (progressData) => {
+                  seedrQueue.updateItem(item.id, {
+                    progress: progressData.percent,
+                    speed: progressData.speed,
+                  });
+                },
+                this.activeAbortController,
+                zipDownloadInfo.headers
+              );
+            }
+
+            // Only delete folder from Seedr cloud AFTER successful download
+            logger.info('SeedrWorker', `Download verified for folder "${folderName}". Deleting from Seedr cloud...`);
             await seedrClient.deleteFolder(folder.id).catch(e => logger.warn('SeedrWorker', `Cloud folder delete error: ${e.message}`));
           }
 
           // 2. Download any loose files in Seedr cloud (if any)
           for (const file of files) {
-            logger.info('SeedrWorker', `Downloading file "${file.name}" (ID: ${file.id})...`);
-            const fileDownloadInfo = await seedrClient.getFileDownload(file.id);
+            const fileName = file.name || 'file';
+            logger.info('SeedrWorker', `Downloading loose file "${fileName}" (ID: ${file.id || file.folder_file_id})...`);
+            const fileDownloadInfo = await seedrClient.getFileDownload(file.id || file.folder_file_id);
 
             await seedrDownloader.downloadFile(
               fileDownloadInfo.url,
               destinationDir,
-              file.name || 'file',
+              fileName,
               (progressData) => {
                 seedrQueue.updateItem(item.id, {
                   progress: progressData.percent,
@@ -169,9 +208,9 @@ class SeedrWorker {
               fileDownloadInfo.headers
             );
 
-            // Delete file from Seedr cloud to free quota
-            logger.info('SeedrWorker', `File download completed. Deleting file "${file.name}" (ID: ${file.id}) from Seedr cloud...`);
-            await seedrClient.deleteFile(file.id).catch(e => logger.warn('SeedrWorker', `Cloud file delete error: ${e.message}`));
+            // Only delete file from Seedr cloud AFTER successful download
+            logger.info('SeedrWorker', `Download verified for file "${fileName}". Deleting from Seedr cloud...`);
+            await seedrClient.deleteFile(file.id || file.folder_file_id).catch(e => logger.warn('SeedrWorker', `Cloud file delete error: ${e.message}`));
           }
 
           // Mark completed
@@ -191,10 +230,8 @@ class SeedrWorker {
           if (downloadErr.name === 'CanceledError' || downloadErr.message?.includes('canceled') || downloadErr.message?.includes('aborted')) {
             logger.warn('SeedrWorker', `Local download for "${item.title}" was aborted`);
           } else {
-            logger.error('SeedrWorker', `Local download failed for "${item.title}": ${downloadErr.message}`);
-            // Cleanup any folders/files from Seedr
-            for (const f of folders) await seedrClient.deleteFolder(f.id).catch(() => {});
-            for (const f of files) await seedrClient.deleteFile(f.id).catch(() => {});
+            logger.error('SeedrWorker', `Local download failed for "${item.title}": ${downloadErr.message}. Preserving Seedr cloud files for retry.`);
+            // NOTE: DO NOT delete folders/files on download failure so user can retry!
 
             seedrQueue.updateItem(item.id, {
               status: 'failed',
@@ -333,6 +370,45 @@ class SeedrWorker {
     }
 
     return { ok: true, item: seedrQueue.getItem(id) };
+  }
+
+  /**
+   * Re-queue a failed or cancelled task for processing
+   */
+  async retryTask(id) {
+    const item = seedrQueue.getItem(id);
+    if (!item) {
+      throw new Error(`Item ${id} not found in Seedr queue`);
+    }
+
+    const updated = seedrQueue.retryItem(id);
+    logger.info('SeedrWorker', `Task "${item.title}" re-queued. Triggering worker check...`);
+
+    // If worker has no active items, trigger tick immediately
+    const active = seedrQueue.getActiveItem();
+    if (!active || active.id === id) {
+      setTimeout(() => this.triggerCheck(), 500);
+    }
+
+    return { ok: true, item: updated };
+  }
+
+  /**
+   * Permanently delete a task by ID
+   */
+  async deleteTask(id) {
+    const item = seedrQueue.getItem(id);
+    if (!item) {
+      return { ok: true, message: 'Item not found or already deleted' };
+    }
+
+    // If active, cancel/abort first
+    if (['started', 'downloading_seedr', 'downloading_local'].includes(item.status)) {
+      await this.cancelTask(id, 'Deleted by user');
+    }
+
+    seedrQueue.deleteItem(id);
+    return { ok: true, message: 'Item deleted permanently' };
   }
 }
 

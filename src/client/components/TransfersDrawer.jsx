@@ -51,6 +51,8 @@ export default function TransfersDrawer({
   seedrQueue = [],
   seedrSpace = null,
   onCancelSeedr,
+  onRetrySeedr,
+  onDeleteSeedr,
   onClearCompletedSeedr,
   onClose,
 }) {
@@ -193,16 +195,39 @@ export default function TransfersDrawer({
                           <div className="transfer-title" title={item.title}>
                             {item.title}
                           </div>
-                          {isActive && (
-                            <button
-                              type="button"
-                              className="btn-card-cancel"
-                              onClick={() => onCancelSeedr(item.id)}
-                              title="Cancel Seedr Download"
-                            >
-                              <i className="fa-solid fa-xmark"></i>
-                            </button>
-                          )}
+                          <div className="seedr-card-controls">
+                            {(item.status === 'failed' || item.status === 'cancelled') && (
+                              <button
+                                type="button"
+                                className="btn-card-action btn-card-retry"
+                                onClick={() => onRetrySeedr && onRetrySeedr(item.id)}
+                                title="Re-add to queue and retry download"
+                              >
+                                <i className="fa-solid fa-rotate-right"></i>
+                                <span>Retry</span>
+                              </button>
+                            )}
+                            {(item.status === 'failed' || item.status === 'cancelled' || item.status === 'completed') && (
+                              <button
+                                type="button"
+                                className="btn-card-action btn-card-delete"
+                                onClick={() => onDeleteSeedr && onDeleteSeedr(item.id)}
+                                title="Delete task permanently"
+                              >
+                                <i className="fa-solid fa-trash-can"></i>
+                              </button>
+                            )}
+                            {isActive && (
+                              <button
+                                type="button"
+                                className="btn-card-cancel"
+                                onClick={() => onCancelSeedr && onCancelSeedr(item.id)}
+                                title="Cancel Seedr Download"
+                              >
+                                <i className="fa-solid fa-xmark"></i>
+                              </button>
+                            )}
+                          </div>
                         </div>
 
                         {/* Progress bar for active downloads */}

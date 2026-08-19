@@ -262,6 +262,68 @@ router.post('/seedr/cancel/:id', async (req, res) => {
 });
 
 /**
+ * POST /api/seedr/retry/:id
+ * Re-queue a failed or cancelled Seedr transfer
+ */
+router.post('/seedr/retry/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await seedrService.worker.retryTask(id);
+    return res.json({
+      success: true,
+      message: 'Task re-queued successfully',
+      ...result,
+    });
+  } catch (error) {
+    logger.error('API:SeedrRetry', `Failed to retry Seedr task: ${error.message}`);
+    return res.status(400).json({
+      success: false,
+      error: error.message || 'Failed to retry Seedr task',
+    });
+  }
+});
+
+/**
+ * DELETE /api/seedr/item/:id (and POST /api/seedr/delete/:id)
+ * Permanently remove a task from Seedr queue and cleanup cloud files
+ */
+router.delete('/seedr/item/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await seedrService.worker.deleteTask(id);
+    return res.json({
+      success: true,
+      message: 'Task permanently removed',
+      ...result,
+    });
+  } catch (error) {
+    logger.error('API:SeedrDelete', `Failed to delete Seedr task: ${error.message}`);
+    return res.status(400).json({
+      success: false,
+      error: error.message || 'Failed to delete Seedr task',
+    });
+  }
+});
+
+router.post('/seedr/delete/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await seedrService.worker.deleteTask(id);
+    return res.json({
+      success: true,
+      message: 'Task permanently removed',
+      ...result,
+    });
+  } catch (error) {
+    logger.error('API:SeedrDelete', `Failed to delete Seedr task: ${error.message}`);
+    return res.status(400).json({
+      success: false,
+      error: error.message || 'Failed to delete Seedr task',
+    });
+  }
+});
+
+/**
  * POST /api/seedr/clear-completed
  * Clear completed and cancelled tasks from Seedr queue
  */
@@ -275,10 +337,11 @@ router.post('/seedr/clear-completed', (req, res) => {
       queue: remaining,
     });
   } catch (error) {
-    logger.error('API:SeedrClearCompleted', `Failed to clear completed items: ${error.message}`);
+    logger.error('API:SeedrClearCompleted', `Failed to clear finished tasks: ${error.message}`);
     return res.status(500).json({
       success: false,
-      error: error.message,
+      error: 'Failed to clear completed tasks',
+      details: error.message,
     });
   }
 });
