@@ -5,14 +5,15 @@ const logger = require('../../utils/logger');
 
 class SeedrDownloader {
   /**
-   * Download a single file from direct HTTPS URL to local path
-   * @param {string} url Direct Seedr CDN download URL
+   * Download a single file/archive from direct HTTPS URL to local path
+   * @param {string} url Direct Seedr CDN download URL or REST download endpoint
    * @param {string} destinationDir Local destination directory
    * @param {string} fileName Target file name
    * @param {Function} onProgress Progress callback ({ percent, downloadedBytes, totalBytes, speed })
    * @param {Object} abortController Optional AbortController
+   * @param {Object} customHeaders Optional HTTP headers (e.g. Auth headers)
    */
-  async downloadFile(url, destinationDir, fileName, onProgress = null, abortController = null) {
+  async downloadFile(url, destinationDir, fileName, onProgress = null, abortController = null, customHeaders = {}) {
     if (!fs.existsSync(destinationDir)) {
       fs.mkdirSync(destinationDir, { recursive: true });
     }
@@ -27,8 +28,13 @@ class SeedrDownloader {
     const response = await axios({
       method: 'GET',
       url: url,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ...customHeaders,
+      },
       responseType: 'stream',
-      timeout: 60000,
+      timeout: 120000,
+      maxRedirects: 6,
       signal: abortController ? abortController.signal : undefined,
     });
 

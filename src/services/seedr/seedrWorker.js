@@ -100,114 +100,78 @@ class SeedrWorker {
       const files = rootFolder.files || [];
 
       // Case A: Torrent is currently downloading in Seedr Cloud
-      const matchingTorrent = activeTorrents.find(t => 
-        (item.seedrTorrentId && String(t.id) === String(item.seedrTorrentId)) ||
-        (t.name && item.title && t.name.toLowerCase().includes(item.title.substring(0, 15).toLowerCase()))
-      );
-
-      if (matchingTorrent) {
-        const cloudProgress = Math.min(100, Math.max(0, Math.round(matchingTorrent.progress || 0)));
-        logger.info('SeedrWorker', `Task "${item.title}" is downloading in Seedr Cloud: ${cloudProgress}%`);
+      // If there are ANY active torrent transfers in Seedr, update progress and wait
+      if (activeTorrents.length > 0) {
+        const activeT = activeTorrents[0];
+        const cloudProgress = Math.min(100, Math.max(0, Math.round(activeT.progress || 0)));
+        logger.info('SeedrWorker', `Task "${item.title}" is downloading in Seedr Cloud: ${cloudProgress}% (${activeT.name || 'Transfer'})`);
         seedrQueue.updateItem(item.id, {
           status: 'downloading_seedr',
           progress: cloudProgress,
-          seedrTorrentId: matchingTorrent.id,
+          seedrTorrentId: activeT.id,
         });
         return;
       }
 
-      // Case B: Cloud download finished - Torrent converted to a Folder or File in Seedr
-      // Look for matching folder or file in Seedr root
-      const matchingFolder = folders.find(f => 
-        (item.seedrFolderId && String(f.id) === String(item.seedrFolderId)) ||
-        (f.name && item.title && (f.name.toLowerCase().includes(item.title.substring(0, 15).toLowerCase()) || item.title.toLowerCase().includes(f.name.substring(0, 15).toLowerCase())))
-      );
-
-      const matchingFile = files.find(f => 
-        (item.seedrFileId && String(f.id) === String(item.seedrFileId)) ||
-        (f.name && item.title && (f.name.toLowerCase().includes(item.title.substring(0, 15).toLowerCase()) || item.title.toLowerCase().includes(f.name.substring(0, 15).toLowerCase())))
-      );
-
-      if (matchingFolder || matchingFile) {
-        logger.info('SeedrWorker', `Task "${item.title}" completed in Seedr cloud! Starting local direct download...`);
+      // Case B: Cloud download finished! We have completed folders or files in Seedr cloud
+      if (folders.length > 0 || files.length > 0) {
+        logger.info('SeedrWorker', `Task "${item.title}" completed in Seedr cloud! (Found ${folders.length} folder(s), ${files.length} file(s)). Starting local ZIP download...`);
         seedrQueue.updateItem(item.id, {
           status: 'downloading_local',
-          seedrFolderId: matchingFolder ? matchingFolder.id : null,
-          seedrFileId: matchingFile ? matchingFile.id : null,
         });
 
         // Set up AbortController for cancel capability
         this.activeAbortController = new AbortController();
+        const destinationDir = item.savePath || config.defaultDownloadDir;
 
         try {
-          if (matchingFile) {
-            // Single file download
-            const directUrl = await seedrClient.getFileUrl(matchingFile.id);
-            if (!directUrl) throw new Error(`Could not obtain direct URL for Seedr file ${matchingFile.id}`);
+          // 1. Download every folder from Seedr cloud as a ZIP file
+          for (const folder of folders) {
+            logger.info('SeedrWorker', `Downloading folder "${folder.name}" (ID: ${folder.id}) as ZIP...`);
+            const zipDownloadInfo = await seedrClient.getFolderZipDownload(folder.id);
+            const zipFileName = `${folder.name || item.title || 'download'}.zip`;
 
             await seedrDownloader.downloadFile(
-              directUrl,
-              item.savePath || config.defaultDownloadDir,
-              matchingFile.name,
+              zipDownloadInfo.url,
+              destinationDir,
+              zipFileName,
               (progressData) => {
                 seedrQueue.updateItem(item.id, {
                   progress: progressData.percent,
                   speed: progressData.speed,
                 });
               },
-              this.activeAbortController
+              this.activeAbortController,
+              zipDownloadInfo.headers
             );
-          } else if (matchingFolder) {
-            // Folder download: Inspect files inside folder
-            const folderDetails = await seedrClient.getFolder(matchingFolder.id);
-            const folderFiles = folderDetails.files || [];
 
-            if (folderFiles.length > 0) {
-              const targetSubDir = path.join(item.savePath || config.defaultDownloadDir, matchingFolder.name);
-              for (const subFile of folderFiles) {
-                const subUrl = await seedrClient.getFileUrl(subFile.id);
-                if (subUrl) {
-                  await seedrDownloader.downloadFile(
-                    subUrl,
-                    targetSubDir,
-                    subFile.name,
-                    (progressData) => {
-                      seedrQueue.updateItem(item.id, {
-                        progress: progressData.percent,
-                        speed: progressData.speed,
-                      });
-                    },
-                    this.activeAbortController
-                  );
-                }
-              }
-            } else {
-              // Fallback: Download whole folder archive as zip
-              const archiveUrl = await seedrClient.getFolderDownloadUrl(matchingFolder.id);
-              if (!archiveUrl) throw new Error(`Could not obtain archive URL for Seedr folder ${matchingFolder.id}`);
-
-              await seedrDownloader.downloadFile(
-                archiveUrl,
-                item.savePath || config.defaultDownloadDir,
-                `${matchingFolder.name}.zip`,
-                (progressData) => {
-                  seedrQueue.updateItem(item.id, {
-                    progress: progressData.percent,
-                    speed: progressData.speed,
-                  });
-                },
-                this.activeAbortController
-              );
-            }
+            // Delete folder from Seedr cloud to free quota
+            logger.info('SeedrWorker', `ZIP download completed. Deleting folder "${folder.name}" (ID: ${folder.id}) from Seedr cloud...`);
+            await seedrClient.deleteFolder(folder.id).catch(e => logger.warn('SeedrWorker', `Cloud folder delete error: ${e.message}`));
           }
 
-          // Step: Local Download Finished Successfully -> Delete Cloud Files from Seedr to Free 5GB Quota
-          logger.info('SeedrWorker', `Local download finished for "${item.title}". Cleaning up Seedr cloud storage...`);
-          if (matchingFolder) {
-            await seedrClient.deleteFolder(matchingFolder.id).catch(e => logger.warn('SeedrWorker', `Cloud folder cleanup error: ${e.message}`));
-          }
-          if (matchingFile) {
-            await seedrClient.deleteFile(matchingFile.id).catch(e => logger.warn('SeedrWorker', `Cloud file cleanup error: ${e.message}`));
+          // 2. Download any loose files in Seedr cloud (if any)
+          for (const file of files) {
+            logger.info('SeedrWorker', `Downloading file "${file.name}" (ID: ${file.id})...`);
+            const fileDownloadInfo = await seedrClient.getFileDownload(file.id);
+
+            await seedrDownloader.downloadFile(
+              fileDownloadInfo.url,
+              destinationDir,
+              file.name || 'file',
+              (progressData) => {
+                seedrQueue.updateItem(item.id, {
+                  progress: progressData.percent,
+                  speed: progressData.speed,
+                });
+              },
+              this.activeAbortController,
+              fileDownloadInfo.headers
+            );
+
+            // Delete file from Seedr cloud to free quota
+            logger.info('SeedrWorker', `File download completed. Deleting file "${file.name}" (ID: ${file.id}) from Seedr cloud...`);
+            await seedrClient.deleteFile(file.id).catch(e => logger.warn('SeedrWorker', `Cloud file delete error: ${e.message}`));
           }
 
           // Mark completed
@@ -228,9 +192,9 @@ class SeedrWorker {
             logger.warn('SeedrWorker', `Local download for "${item.title}" was aborted`);
           } else {
             logger.error('SeedrWorker', `Local download failed for "${item.title}": ${downloadErr.message}`);
-            // Treat as failed, cleanup Seedr
-            if (matchingFolder) await seedrClient.deleteFolder(matchingFolder.id).catch(() => {});
-            if (matchingFile) await seedrClient.deleteFile(matchingFile.id).catch(() => {});
+            // Cleanup any folders/files from Seedr
+            for (const f of folders) await seedrClient.deleteFolder(f.id).catch(() => {});
+            for (const f of files) await seedrClient.deleteFile(f.id).catch(() => {});
 
             seedrQueue.updateItem(item.id, {
               status: 'failed',
@@ -246,8 +210,15 @@ class SeedrWorker {
         return;
       }
 
-      // Case C: Neither active torrent nor completed folder/file found in Seedr (Errored / Removed on Seedr)
-      logger.warn('SeedrWorker', `Active task "${item.title}" not found in Seedr transfers or folders. Marking as failed.`);
+      // Case C: Neither active torrent nor folders/files found in Seedr
+      // Give a 30-second grace window after item was marked started
+      const elapsedSinceStart = Date.now() - (item.startedAt || item.addedAt || 0);
+      if (elapsedSinceStart < 30000) {
+        logger.info('SeedrWorker', `Task "${item.title}" recently started (${Math.round(elapsedSinceStart / 1000)}s ago). Waiting for Seedr to register.`);
+        return;
+      }
+
+      logger.warn('SeedrWorker', `Active task "${item.title}" not found in Seedr transfers or folders after ${Math.round(elapsedSinceStart / 1000)}s. Marking as failed.`);
       seedrQueue.updateItem(item.id, {
         status: 'failed',
         error: 'Torrent did not complete or was removed from Seedr cloud',

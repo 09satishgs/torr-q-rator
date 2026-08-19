@@ -163,28 +163,71 @@ class SeedrClient {
   }
 
   /**
-   * Get direct download URL for a specific file
+   * Get direct download stream/URL info for a folder as ZIP
    */
-  async getFileUrl(fileId) {
-    try {
-      const data = await this.request('GET', `/file/${fileId}/url`);
-      if (data && data.url) {
-        return data.url;
-      }
-    } catch (err) {
-      logger.warn('SeedrClient', `GET /file/${fileId}/url failed, trying fallback /file/${fileId}: ${err.message}`);
-    }
+  async getFolderZipDownload(folderId) {
+    const authHeaders = await this.getAuthHeaders();
+    const endpoint = `${SEEDR_REST_BASE}/folder/${folderId}/download`;
 
-    const fileData = await this.request('GET', `/file/${fileId}`);
-    return fileData.url || fileData.download_url || null;
+    try {
+      const resp = await axios.get(endpoint, {
+        headers: authHeaders,
+        maxRedirects: 0,
+        validateStatus: (status) => status >= 200 && status < 400,
+        timeout: 15000,
+      });
+
+      if (resp.headers.location) {
+        logger.info('SeedrClient', `Obtained direct CDN ZIP link for folder ${folderId}`);
+        return { url: resp.headers.location, headers: {} };
+      }
+
+      if (resp.data && typeof resp.data === 'object') {
+        const direct = resp.data.url || resp.data.archive_url || resp.data.download_url;
+        if (direct) return { url: direct, headers: {} };
+      }
+    } catch (_) {}
+
+    return { url: endpoint, headers: authHeaders };
   }
 
   /**
-   * Get folder download (ZIP) URL
+   * Get direct download stream/URL info for a file
+   */
+  async getFileDownload(fileId) {
+    const authHeaders = await this.getAuthHeaders();
+
+    try {
+      const resp = await this.request('GET', `/file/${fileId}/url`);
+      if (resp && (resp.url || resp.download_url)) {
+        return { url: resp.url || resp.download_url, headers: {} };
+      }
+    } catch (_) {}
+
+    try {
+      const fileData = await this.request('GET', `/file/${fileId}`);
+      if (fileData && (fileData.url || fileData.download_url)) {
+        return { url: fileData.url || fileData.download_url, headers: {} };
+      }
+    } catch (_) {}
+
+    return { url: `${SEEDR_REST_BASE}/file/${fileId}`, headers: authHeaders };
+  }
+
+  /**
+   * Legacy method: Get direct download URL for a specific file
+   */
+  async getFileUrl(fileId) {
+    const info = await this.getFileDownload(fileId);
+    return info.url;
+  }
+
+  /**
+   * Legacy method: Get folder download (ZIP) URL
    */
   async getFolderDownloadUrl(folderId) {
-    const data = await this.request('GET', `/folder/${folderId}/download`);
-    return data.url || data.download_url || null;
+    const info = await this.getFolderZipDownload(folderId);
+    return info.url;
   }
 
   /**
